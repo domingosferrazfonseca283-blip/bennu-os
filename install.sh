@@ -1,37 +1,28 @@
 #!/usr/bin/env bash
 set -e
 
-echo "[*] Iniciando a instalação do Bennu OS Toolkit..."
+echo "[*] Instalando o Bennu OS e a interface gráfica..."
 
 INSTALL_DIR="/opt/bennu"
-BIN_DIR="/usr/local/bin"
 
 if [ "$EUID" -ne 0 ]; then
-    echo "[x] Por favor, execute como root."
-    exit 1
+  echo "[!] Por favor, execute como root (sudo)."
+  exit 1
 fi
 
-mkdir -p "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"/{tools,scripts,config,reports,logs,ui}
 
-if [ -d "toolkit" ]; then
-    cp -r toolkit/* "$INSTALL_DIR/"
+if [ -f "bennu-desktop-v2.html" ]; then
+  cp bennu-desktop-v2.html "$INSTALL_DIR/ui/"
+fi
+
+chmod +x "$INSTALL_DIR"/*.py 2>/dev/null || true
+
+if [ -f "$INSTALL_DIR/bennu.py" ]; then
+  ln -sf "$INSTALL_DIR/bennu.py" /usr/local/bin/bennu
+  chmod +x /usr/local/bin/bennu
+  echo "[+] Bennu OS e interface instalados com sucesso!"
 else
-    cp -r * "$INSTALL_DIR/"
+  echo "[x] Erro: bennu.py não encontrado em $INSTALL_DIR."
+  exit 1
 fi
-
-chmod +x "$INSTALL_DIR"/*.py
-
-for script in "$INSTALL_DIR"/*.py; do
-    filename=$(basename "$script")
-    name="${filename%.py}"
-    ln -sf "$script" "$BIN_DIR/$name"
-    echo "[+] Link criado para: $name"
-done
-
-if [ ! -f "$INSTALL_DIR/config.json" ]; then
-    echo '{"anthropic_api_key": ""}' > "$INSTALL_DIR/config.json"
-    chmod 600 "$INSTALL_DIR/config.json"
-    echo "[+] Arquivo de configuração gerado em $INSTALL_DIR/config.json"
-fi
-
-echo "[*] Instalação concluída com sucesso!"
