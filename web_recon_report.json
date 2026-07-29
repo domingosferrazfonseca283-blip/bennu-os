@@ -1,0 +1,14 @@
+{
+    "target": "http://scanme.nmap.org",
+    "status_code": 200,
+    "headers": {
+        "Date": "Tue, 28 Jul 2026 11:25:43 GMT",
+        "Server": "Apache/2.4.7 (Ubuntu)",
+        "Accept-Ranges": "bytes",
+        "Vary": "Accept-Encoding",
+        "Connection": "close",
+        "Transfer-Encoding": "chunked",
+        "Content-Type": "text/html"
+    },
+    "timestamp": "2026-07-28 12:25:43.162661"
+}

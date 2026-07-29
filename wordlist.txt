@@ -1,0 +1,16 @@
+www
+mail
+remote
+blog
+webmail
+server
+ns1
+ns2
+smtp
+secure
+vpn
+api
+test
+staging
+admin
+portal

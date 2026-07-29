@@ -1,0 +1,42 @@
+{
+    "domain": "nmap.org",
+    "timestamp": "2026-07-28 12:29:37.121665",
+    "results": [
+        {
+            "subdomain": "remote.nmap.org",
+            "ip": "50.116.1.184"
+        },
+        {
+            "subdomain": "blog.nmap.org",
+            "ip": "50.116.1.184"
+        },
+        {
+            "subdomain": "webmail.nmap.org",
+            "ip": "50.116.1.184"
+        },
+        {
+            "subdomain": "server.nmap.org",
+            "ip": "50.116.1.184"
+        },
+        {
+            "subdomain": "ns2.nmap.org",
+            "ip": "50.116.1.184"
+        },
+        {
+            "subdomain": "api.nmap.org",
+            "ip": "50.116.1.184"
+        },
+        {
+            "subdomain": "test.nmap.org",
+            "ip": "50.116.1.184"
+        },
+        {
+            "subdomain": "staging.nmap.org",
+            "ip": "50.116.1.184"
+        },
+        {
+            "subdomain": "portal.nmap.org",
+            "ip": "50.116.1.184"
+        }
+    ]
+}

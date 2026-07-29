@@ -1,0 +1,6 @@
+{
+    "target": "127.0.0.1",
+    "timestamp": "2026-07-29T09:54:48.994498",
+    "ssl_info": {},
+    "error": "[Errno 111] Connection refused"
+}
