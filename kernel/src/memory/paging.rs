@@ -197,6 +197,55 @@ fn map_page_in_root_with_flags(
     Ok(())
 }
 
+
+pub fn translate_user_address(root: u64, virtual_address: u64, write: bool) -> Option<u64> {
+    if root == 0 || root & (PAGE_SIZE - 1) != 0 {
+        return None;
+    }
+
+    let pml4_index = ((virtual_address >> 39) & 0x1ff) as usize;
+    let pdpt_index = ((virtual_address >> 30) & 0x1ff) as usize;
+    let pd_index = ((virtual_address >> 21) & 0x1ff) as usize;
+    let pt_index = ((virtual_address >> 12) & 0x1ff) as usize;
+
+    unsafe {
+        let pml4 = table_at(root);
+        let pml4e = pml4.entries[pml4_index];
+        if pml4e & PRESENT == 0 || pml4e & USER == 0 {
+            return None;
+        }
+        let pdpt = table_at(pml4e & 0x000f_ffff_ffff_f000);
+        let pdpte = pdpt.entries[pdpt_index];
+        if pdpte & PRESENT == 0 || pdpte & USER == 0 {
+            return None;
+        }
+        if pdpte & HUGE_PAGE != 0 {
+            let physical = (pdpte & 0x000f_ffff_c000_0000)
+                + (virtual_address & 0x3fff_ffff);
+            return Some(physical);
+        }
+
+        let pd = table_at(pdpte & 0x000f_ffff_ffff_f000);
+        let pde = pd.entries[pd_index];
+        if pde & PRESENT == 0 || pde & USER == 0 {
+            return None;
+        }
+        if pde & HUGE_PAGE != 0 {
+            let physical = (pde & 0x000f_ffff_ffe0_0000)
+                + (virtual_address & 0x1f_ffff);
+            return Some(physical);
+        }
+
+        let pt = table_at(pde & 0x000f_ffff_ffff_f000);
+        let pte = pt.entries[pt_index];
+        if pte & PRESENT == 0 || pte & USER == 0 || (write && pte & WRITABLE == 0) {
+            return None;
+        }
+
+        Some((pte & 0x000f_ffff_ffff_f000) + (virtual_address & 0xfff))
+    }
+}
+
 pub fn map_page(virtual_address: u64, physical_frame: u64) -> Result<(), &'static str> {
     if virtual_address & (PAGE_SIZE - 1) != 0
         || physical_frame & (PAGE_SIZE - 1) != 0
