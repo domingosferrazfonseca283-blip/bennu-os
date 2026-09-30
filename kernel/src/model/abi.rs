@@ -74,6 +74,18 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
                 ResultCode::error(ABI_STATUS_NOT_FOUND)
             }
         }
+        Operation::MemoryMap => {
+            match super::runtime::memory_map(
+                cell,
+                call.capability,
+                call.object,
+                call.argument,
+                (call.value & 1) != 0,
+            ) {
+                Ok(address) => ResultCode { status: ABI_STATUS_OK, value: address },
+                Err(_) => ResultCode::error(ABI_STATUS_DENIED),
+            }
+        }
         Operation::EventEmit => {
             if !super::runtime::permits(
                 cell,
