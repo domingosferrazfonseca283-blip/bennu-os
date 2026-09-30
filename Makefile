@@ -11,7 +11,7 @@ all: image
 
 image:
 	mkdir -p build
-	RUSTFLAGS="-C link-arg=-Tkernel/linker.ld" cargo build --manifest-path kernel/Cargo.toml --target $(KERNEL_TARGET) --release -Zbuild-std=core -Zjson-target-spec
+	RUSTFLAGS="-C link-arg=-T$(CURDIR)/kernel/linker.ld" cargo build --manifest-path kernel/Cargo.toml --target $(KERNEL_TARGET) --release -Zbuild-std=core -Zjson-target-spec
 	llvm-objcopy -O binary target/$(KERNEL_TARGET)/release/bennu-kernel $(KERNEL_BIN)
 	@KERNEL_BYTES=$$(wc -c < $(KERNEL_BIN)); \
 	KERNEL_SECTORS=$$(( (KERNEL_BYTES + 511) / 512 )); \
