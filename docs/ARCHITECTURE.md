@@ -126,3 +126,14 @@ A implementação futura do contexto deverá definir explicitamente:
 - comportamento de yield, wait, wake e stop.
 
 Isso mantém a fronteira entre o modelo conceptual de Cell e os mecanismos internos necessários para executar código com segurança.
+
+
+## Native I/O Fabric
+
+Bennu models block I/O as an asynchronous fabric rather than synchronous device calls. A BlockRequest enters a bounded I/O queue, is authorized by the USB-first AccessPolicy, becomes an IoEnvelope, and is completed independently of the submitting Cell. Completion carries a token and status so an Event can wake the owning Cell without exposing a conventional blocking syscall model.
+
+Internal storage is not implicitly eligible. The default policy permits the removable boot medium and explicitly removable devices while denying internal storage unless a future authority grants it deliberately.
+
+## PCI Discovery
+
+The kernel contains a first legacy PCI configuration-space discovery path for x86_64. Discovered functions become Bennu Device Objects and emit DeviceAttached events. This is discovery only: BAR mapping, xHCI initialization, USB enumeration, and Mass Storage transport remain separate capabilities in the Device Fabric.
