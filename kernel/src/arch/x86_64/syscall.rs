@@ -24,7 +24,10 @@ bennu_syscall_entry:
 
     lea rdi, [rsp + 8]
     call bennu_syscall_dispatch
-
+    cmp rax, 5
+    jne 1f
+    call bennu_syscall_yield
+1:
     add rsp, 8
     pop r15
     pop r14
@@ -64,6 +67,12 @@ struct RegisterFrame {
 }
 
 #[no_mangle]
+extern "C" fn bennu_syscall_yield() -> ! {
+    unsafe { let _ = crate::arch::x86_64::execution::switch_back_to_scheduler(); }
+    loop { core::hint::spin_loop(); }
+}
+
+#[no_mangle]
 extern "C" fn bennu_syscall_dispatch(frame: *mut RegisterFrame) -> u64 {
     if frame.is_null() {
         return abi::ABI_STATUS_INVALID;
@@ -85,6 +94,7 @@ extern "C" fn bennu_syscall_dispatch(frame: *mut RegisterFrame) -> u64 {
         6 => Operation::MemoryMap,
         7 => Operation::SurfaceCreate,
         8 => Operation::DeviceSubmit,
+        9 => Operation::Yield,
         _ => return abi::ABI_STATUS_UNSUPPORTED,
     };
 
