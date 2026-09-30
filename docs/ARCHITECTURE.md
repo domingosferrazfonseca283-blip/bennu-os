@@ -2,7 +2,9 @@
 
 ## Objetivo
 
-Bennu OS é um sistema operacional independente. O projeto não usa Linux como kernel.
+Bennu OS é um sistema operacional independente. O projeto não usa Linux como kernel nem pretende ser uma distribuição Linux.
+
+O alvo operacional do projeto é um sistema pessoal, inicializado diretamente de um dispositivo USB e capaz de funcionar sem depender de um sistema operacional instalado no computador hospedeiro.
 
 ## Princípios
 
@@ -12,7 +14,9 @@ Bennu OS é um sistema operacional independente. O projeto não usa Linux como k
 - segurança por capacidade e sandbox;
 - interface gráfica própria;
 - arquitetura modular;
-- evolução incremental, mantendo cada etapa inicializável.
+- evolução incremental, mantendo cada etapa inicializável;
+- USB como plataforma de primeira classe;
+- armazenamento interno do computador nunca é acessado ou alterado automaticamente.
 
 ## Camadas
 
@@ -24,9 +28,22 @@ Bennu OS é um sistema operacional independente. O projeto não usa Linux como k
 6. Shell/GUI — experiência do usuário.
 7. Apps — aplicações nativas.
 
+## Estado atual do kernel
+
+O bring-up x86_64 já possui uma fronteira clara entre o bootloader e o kernel:
+
+- Stage 2 entra em long mode;
+- o kernel instala sua própria GDT;
+- o kernel instala sua própria IDT;
+- exceções iniciais têm handlers nativos;
+- diagnóstico pré-userspace usa VGA apenas como canal temporário;
+- o próximo salto é transformar o estado de CPU em infraestrutura de memória e interrupções.
+
+A ABI de interrupção x86-interrupt do Rust é usada apenas na camada de baixo nível; ela não define a API pública do sistema operacional.
+
 ## Primeira plataforma
 
-A primeira plataforma-alvo será x86_64, com execução inicial em máquina virtual/emulador. Outras arquiteturas serão adicionadas depois.
+A primeira plataforma-alvo é x86_64. QEMU é um ambiente de validação durante o desenvolvimento, não uma dependência do sistema final. O alvo físico principal é um computador inicializado diretamente a partir do USB.
 
 ## Regra de engenharia
 
