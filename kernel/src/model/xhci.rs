@@ -170,7 +170,7 @@ pub unsafe fn start_controller(controller:&mut XhciController,cap:CapabilityRegi
     if controller.mmio_base==0 || controller.dcbaa_phys==0 { return Err("xHCI DMA not configured"); }
     let op=controller.mmio_base+cap.cap_length as u64;
     let max_slots=controller.slots.max(1) as u32;
-    write32(op,0x30,max_slots);
+    write32(op,0x38,max_slots);
     core::ptr::write_volatile((op+0x18) as *mut u64,controller.command_ring_phys|1);
     core::ptr::write_volatile((op+0x30) as *mut u64,controller.dcbaa_phys);
     let rt=controller.mmio_base+cap.rtsoff as u64;
