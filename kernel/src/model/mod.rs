@@ -4,6 +4,10 @@ pub mod event;
 pub mod surface;
 pub mod graph;
 pub mod object;
+pub mod sync;
+pub mod address_space;
+pub mod device;
+pub mod scheduler;
 pub mod runtime;
 
 pub use capability::{Capability, CapabilityId, CapabilityRights};
@@ -12,6 +16,7 @@ pub use event::{Event, EventKind};
 pub use object::{ObjectId, ObjectKind, ResourceObject};
 pub use graph::{Relation, RelationKind};
 pub use surface::Surface;
+pub use address_space::{AddressSpace, AddressSpaceId, Mapping, MappingKind};
 
 pub const MAX_CELLS: usize = 64;
 pub const MAX_OBJECTS: usize = 256;
