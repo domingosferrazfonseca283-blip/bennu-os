@@ -16,11 +16,22 @@ pub enum CellState {
     Stopped = 4,
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CellAction {
+    Yield = 0,
+    Wait = 1,
+    Stop = 2,
+}
+
+pub type CellEntry = extern "C" fn() -> CellAction;
+
 #[repr(C)]
 pub struct Cell {
     pub id: CellId,
     pub state: CellState,
     pub root: ObjectId,
+    pub entry: Option<CellEntry>,
     capabilities: [Capability; MAX_CAPABILITIES_PER_CELL],
     capability_count: usize,
 }
@@ -31,6 +42,7 @@ impl Cell {
             id: CellId(0),
             state: CellState::Empty,
             root: ObjectId::NULL,
+            entry: None,
             capabilities: [Capability::EMPTY; MAX_CAPABILITIES_PER_CELL],
             capability_count: 0,
         }
@@ -41,6 +53,7 @@ impl Cell {
             id,
             state: CellState::Ready,
             root,
+            entry: None,
             capabilities: [Capability::EMPTY; MAX_CAPABILITIES_PER_CELL],
             capability_count: 0,
         }
@@ -88,5 +101,26 @@ impl Cell {
 
     pub fn capability_count(&self) -> usize {
         self.capability_count
+    }
+
+    pub fn bind_entry(&mut self, entry: CellEntry) -> Result<(), &'static str> {
+        if self.state == CellState::Empty || self.state == CellState::Stopped {
+            return Err("cell is not executable");
+        }
+        self.entry = Some(entry);
+        self.state = CellState::Ready;
+        Ok(())
+    }
+
+    pub fn run_once(&mut self) -> Result<CellAction, &'static str> {
+        let entry = self.entry.ok_or("cell has no entry")?;
+        self.state = CellState::Running;
+        let action = entry();
+        self.state = match action {
+            CellAction::Yield => CellState::Ready,
+            CellAction::Wait => CellState::Waiting,
+            CellAction::Stop => CellState::Stopped,
+        };
+        Ok(action)
     }
 }
