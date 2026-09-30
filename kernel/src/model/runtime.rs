@@ -302,7 +302,53 @@ pub fn memory_map(
     Ok(virtual_address & !(crate::memory::PAGE_SIZE - 1))
 }
 
+pub fn delegate(
+    source_cell: CellId,
+    source_capability: CapabilityId,
+    target_cell: CellId,
+    object: ObjectId,
+    rights: CapabilityRights,
+) -> Result<CapabilityId, &'static str> {
+    if !rights.is_valid() {
+        return Err("invalid capability rights");
+    }
+
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+
+    let source_index = source_cell.0 as usize;
+    let target_index = target_cell.0 as usize;
+    if source_index >= MAX_CELLS || state.cells[source_index].state == CellState::Empty {
+        return Err("source cell does not exist");
+    }
+    if target_index >= MAX_CELLS || state.cells[target_index].state == CellState::Empty {
+        return Err("target cell does not exist");
+    }
+    if !object_exists_unlocked(state, object) {
+        return Err("object does not exist");
+    }
+
+    let source_rights = state.cells[source_index]
+        .capability_rights(source_capability, object)
+        .ok_or("source capability not found")?;
+
+    let administrative = source_rights.contains(CapabilityRights::ADMIN);
+    if !administrative {
+        if !source_rights.contains(CapabilityRights::SHARE) {
+            return Err("capability is not delegable");
+        }
+        if !rights.is_subset_of(source_rights) {
+            return Err("delegation exceeds source authority");
+        }
+    }
+
+    state.cells[target_index].grant(object, rights)
+}
+
 pub fn grant(cell: CellId, object: ObjectId, rights: CapabilityRights) -> Result<CapabilityId, &'static str> {
+    if !rights.is_valid() {
+        return Err("invalid capability rights");
+    }
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
     let index = cell.0 as usize;
