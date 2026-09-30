@@ -32,6 +32,24 @@ impl RuntimeState {
 
 static RUNTIME: SpinLock<RuntimeState> = SpinLock::new(RuntimeState::EMPTY);
 
+static DEVICE_FABRIC: SpinLock<super::DeviceFabric> = SpinLock::new(super::DeviceFabric::empty());
+
+pub fn register_device_fabric_pci(pci: super::PciDevice, class: super::DeviceClass) -> Result<ObjectId, &'static str> {
+    DEVICE_FABRIC.lock().get_mut().register_pci(pci, class)
+}
+
+pub fn register_xhci_controller(controller: super::XhciController) -> Result<(), &'static str> {
+    DEVICE_FABRIC.lock().get_mut().register_xhci(controller)
+}
+
+pub fn service_device_io() {
+    let request = match super::io_fabric::begin_device() { Some(r) => r, None => return };
+    let result = DEVICE_FABRIC.lock().get_mut().submit(&request);
+    let kind = if result.is_ok() { super::EventKind::DeviceQueued } else { super::EventKind::ResourceChanged };
+    let _ = emit(super::Event::new(kind, request.device, super::ObjectId::NULL, request.token));
+}
+
+
 pub fn init() {
     *RUNTIME.lock().get_mut() = RuntimeState::EMPTY;
     super::graph::init();
