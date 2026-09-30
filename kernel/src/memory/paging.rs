@@ -80,6 +80,60 @@ pub fn init() -> Result<(), &'static str> {
 /// The page-table pages themselves are kept below 64 MiB so the bootstrap
 /// identity map can access them while the virtual-memory manager is still
 /// being brought up.
+pub fn current_root() -> u64 { unsafe { read_cr3() } }
+
+pub fn create_address_space_root() -> Result<u64, &'static str> {
+    let root=allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space root")?;
+    unsafe {
+        let dst=zero_table(root);
+        let src=table_at(read_cr3());
+        for i in 0..PAGE_TABLE_ENTRIES {
+            dst.entries[i]=src.entries[i];
+        }
+    }
+    Ok(root)
+}
+
+pub unsafe fn switch_address_space(root:u64) -> Result<(), &'static str> {
+    if root==0 || root & (PAGE_SIZE-1)!=0 { return Err("invalid address-space root"); }
+    load_cr3(root);
+    Ok(())
+}
+
+pub fn map_page_in_root(root:u64, virtual_address:u64, physical_frame:u64) -> Result<(), &'static str> {
+    if root==0 || root & (PAGE_SIZE-1)!=0 { return Err("invalid address-space root"); }
+    if virtual_address & (PAGE_SIZE-1)!=0 || physical_frame & (PAGE_SIZE-1)!=0 { return Err("unaligned page mapping"); }
+    let pml4_index=((virtual_address>>39)&0x1ff) as usize;
+    let pdpt_index=((virtual_address>>30)&0x1ff) as usize;
+    let pd_index=((virtual_address>>21)&0x1ff) as usize;
+    let pt_index=((virtual_address>>12)&0x1ff) as usize;
+    unsafe {
+        let pml4=table_at(root);
+        let pdpt_frame=pml4.entries[pml4_index]&0x000f_ffff_ffff_f000;
+        let pdpt_frame=if pdpt_frame==0 {
+            let f=allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space PDPT")?;
+            zero_table(f); pml4.entries[pml4_index]=f|PRESENT|WRITABLE; f
+        } else { pdpt_frame };
+        let pdpt=table_at(pdpt_frame);
+        if pdpt.entries[pdpt_index]&HUGE_PAGE!=0 { return Err("address-space mapping hits huge page"); }
+        let pd_frame=pdpt.entries[pdpt_index]&0x000f_ffff_ffff_f000;
+        let pd_frame=if pd_frame==0 {
+            let f=allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space PD")?;
+            zero_table(f); pdpt.entries[pdpt_index]=f|PRESENT|WRITABLE; f
+        } else { pd_frame };
+        let pd=table_at(pd_frame);
+        if pd.entries[pd_index]&HUGE_PAGE!=0 { return Err("address-space mapping hits huge page"); }
+        let pt_frame=pd.entries[pd_index]&0x000f_ffff_ffff_f000;
+        let pt_frame=if pt_frame==0 {
+            let f=allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space PT")?;
+            zero_table(f); pd.entries[pd_index]=f|PRESENT|WRITABLE; f
+        } else { pt_frame };
+        let pt=table_at(pt_frame);
+        pt.entries[pt_index]=physical_frame|PRESENT|WRITABLE;
+    }
+    Ok(())
+}
+
 pub fn map_page(virtual_address: u64, physical_frame: u64) -> Result<(), &'static str> {
     if virtual_address & (PAGE_SIZE - 1) != 0
         || physical_frame & (PAGE_SIZE - 1) != 0
