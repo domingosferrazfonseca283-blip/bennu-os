@@ -53,7 +53,7 @@ impl Scheduler {
                 continue;
             }
 
-            let context = match super::runtime::context_ptr(id) {
+            let (context, address_space_root) = match super::runtime::context_ptr(id) {
                 Some(context) => context,
                 None => continue,
             };
@@ -62,7 +62,7 @@ impl Scheduler {
             CURRENT_CELL.store(id.0, Ordering::Release);
 
             unsafe {
-                if execution::switch_to_cell(context).is_ok() {
+                if execution::switch_to_cell(context, address_space_root).is_ok() {
                     return Some(id);
                 }
             }
