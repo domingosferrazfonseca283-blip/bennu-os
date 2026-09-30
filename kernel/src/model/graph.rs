@@ -1,4 +1,4 @@
-use super::object::{ObjectId, ObjectKind};
+use super::object::ObjectId;
 use super::MAX_OBJECTS;
 
 const MAX_RELATIONS: usize = 512;
