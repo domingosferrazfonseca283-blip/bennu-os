@@ -22,7 +22,7 @@ bennu_syscall_entry:
     push r15
     sub rsp, 8
 
-    mov rdi, rsp
+    lea rdi, [rsp + 8]
     call bennu_syscall_dispatch
 
     add rsp, 8
@@ -33,7 +33,7 @@ bennu_syscall_entry:
     pop rbp
     pop rbx
     pop rcx
-    add rsp, 8
+    pop rax
     pop rdi
     pop rsi
     pop rdx
