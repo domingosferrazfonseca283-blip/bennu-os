@@ -144,6 +144,17 @@ pub fn user_entry(cell: CellId) -> Option<(u64, u64)> {
     state.cells[index].user_entry()
 }
 
+pub fn cell_address_space_root(cell: CellId) -> Option<u64> {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
+        None
+    } else {
+        Some(state.cells[index].address_space_root)
+    }
+}
+
 pub fn kernel_stack_top(cell: CellId) -> Option<u64> {
     let guard = RUNTIME.lock();
     let state = guard.get();
