@@ -229,3 +229,12 @@ A operação valida simultaneamente:
 - a requisição é colocada na fila assíncrona do Device Fabric.
 
 A execução física do driver pode consumir essa fila posteriormente, sem conceder à Cell acesso direto a MMIO, PCI ou DMA. O próximo estágio é ligar essa fila aos registros concretos de `DeviceFabric`/xHCI e devolver completions através do Event Fabric.
+
+
+### ABI de DeviceSubmit
+
+A fronteira Ring 3 não entrega uma estrutura de kernel diretamente. A chamada nativa usa registradores separados: Capability em RDI, Device Object em RSI, buffer USER em RDX, comprimento em R10, token em R8 e opcode/flags compactados em R11. O kernel valida o intervalo USER antes de construir o `DeviceRequest` interno.
+
+O request interno conserva buffer, comprimento, argumento, valor e token como dados do kernel. A fila não recebe ponteiros físicos nem autoridade adicional. Assim, uma Cell só consegue submeter I/O para um Device Object que já possui através de Capability e dentro de um intervalo virtual que o kernel aceitou.
+
+A implementação atual limita opcode e flags ao formato compacto da ABI; a execução física ainda pertence ao Device Fabric/driver e a conclusão será entregue pelo Event Fabric.
