@@ -15,6 +15,7 @@ pub enum Operation {
     MemoryMap = 6,
     SurfaceCreate = 7,
     DeviceSubmit = 8,
+    Yield = 9,
 }
 
 #[repr(C)]
@@ -57,9 +58,11 @@ pub const ABI_STATUS_INVALID: u64 = 1;
 pub const ABI_STATUS_DENIED: u64 = 2;
 pub const ABI_STATUS_NOT_FOUND: u64 = 3;
 pub const ABI_STATUS_UNSUPPORTED: u64 = 4;
+pub const ABI_STATUS_YIELD: u64 = 5;
 
 pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
     match call.operation {
+        Operation::Yield => ResultCode::error(ABI_STATUS_YIELD),
         Operation::None => ResultCode::error(ABI_STATUS_INVALID),
         Operation::ObjectQuery => {
             if super::runtime::object_exists(call.object) {
