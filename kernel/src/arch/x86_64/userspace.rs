@@ -41,8 +41,8 @@ pub fn install(cell: crate::model::CellId, root: u64) -> Result<(), &'static str
         core::ptr::write_bytes(stack_frame as *mut u8, 0, paging::PAGE_SIZE as usize);
     }
 
-    paging::map_user_page_in_root(root, USER_CODE, code_frame, false)?;
-    paging::map_user_page_in_root(root, USER_STACK, stack_frame, true)?;
+    paging::map_user_page_in_root(root, USER_CODE, code_frame, false, true)?;
+    paging::map_user_page_in_root(root, USER_STACK, stack_frame, true, false)?;
     crate::model::runtime::configure_user_entry(cell, USER_CODE, USER_STACK_TOP)
 }
 
