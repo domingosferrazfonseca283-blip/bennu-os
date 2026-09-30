@@ -124,10 +124,10 @@ pub fn allocate_frame_below(limit: u64) -> Option<u64> {
     unsafe {
         for index in 0..REGION_COUNT {
             let region = &mut REGIONS[index];
-            if region.next < region.end && region.next < limit {
+            if region.next < region.end {
                 let frame = region.next;
                 let next = region.next.saturating_add(PAGE_SIZE);
-                if next <= limit || frame < limit {
+                if next <= limit {
                     region.next = next;
                     return Some(frame);
                 }
