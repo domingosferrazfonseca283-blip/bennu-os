@@ -384,7 +384,7 @@ pub fn device_submit(
     }
     drop(guard);
     super::io_fabric::submit_device(super::DeviceRequest {
-        device: object, opcode, flags, argument, value, buffer, token,
+        device: object, opcode, flags, argument, value, buffer, length: 1, token,
     })
 }
 
