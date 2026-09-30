@@ -1,8 +1,8 @@
-use super::{BlockDevice, BlockRequest, IoCompletion, IoEnvelope, IoState, IoStatus, ObjectId};
+use super::{BlockDevice, BlockRequest, DeviceRequest, IoCompletion, IoEnvelope, IoState, IoStatus, ObjectId};
 use super::policy::AccessPolicy;
 use super::sync::SpinLock;
 
-pub const IO_QUEUE_CAPACITY: usize = 64;
+pub pub const DEVICE_QUEUE_CAPACITY: usize = 64;
 
 struct IoStateTable {
     queue: [IoEnvelope; IO_QUEUE_CAPACITY],
@@ -36,6 +36,26 @@ impl IoStateTable {
 }
 
 static IO: SpinLock<IoStateTable> = SpinLock::new(IoStateTable::EMPTY);
+static DEVICE_IO: SpinLock<DeviceIoTable> = SpinLock::new(DeviceIoTable::EMPTY);
+
+struct DeviceIoTable {
+    queue: [DeviceRequest; DEVICE_QUEUE_CAPACITY],
+    head: usize,
+    tail: usize,
+}
+impl DeviceIoTable {
+    const EMPTY: Self = Self { queue:[DeviceRequest::EMPTY; DEVICE_QUEUE_CAPACITY], head:0, tail:0 };
+    fn push(&mut self, request: DeviceRequest) -> Result<(), &'static str> {
+        let next=(self.tail+1)%DEVICE_QUEUE_CAPACITY;
+        if next==self.head { return Err("device I/O queue full"); }
+        self.queue[self.tail]=request; self.tail=next; Ok(())
+    }
+    fn pop(&mut self)->Option<DeviceRequest>{
+        if self.head==self.tail{return None;}
+        let r=self.queue[self.head]; self.head=(self.head+1)%DEVICE_QUEUE_CAPACITY; Some(r)
+    }
+}
+
 
 pub fn init(policy: AccessPolicy) {
     *IO.lock().get_mut() = IoStateTable { policy, ..IoStateTable::EMPTY };
@@ -92,3 +112,11 @@ pub fn queued() -> usize {
 }
 
 pub const fn queue_capacity() -> usize { IO_QUEUE_CAPACITY }
+
+
+pub fn submit_device(request: DeviceRequest) -> Result<(), &'static str> {
+    if !request.is_valid() { return Err("invalid device request"); }
+    DEVICE_IO.lock().get_mut().push(request)
+}
+
+pub fn begin_device() -> Option<DeviceRequest> { DEVICE_IO.lock().get_mut().pop() }
