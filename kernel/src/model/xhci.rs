@@ -437,3 +437,40 @@ pub fn control_transfer_trbs(
  let data_in=setup.request_type & 0x80 != 0;
  (setup_trb,Some(data_stage_trb(data_buffer,data_length as u32,data_in,false)),status_stage_trb(!data_in))
 }
+
+
+/// Allocate and submit one EP0 control-transfer ring.  The returned physical
+/// address identifies the Setup Stage TRB and can be correlated with a
+/// Transfer Event later.
+pub fn enqueue_control_transfer(
+ controller:&mut XhciController,
+ slot:u8,
+ setup:UsbSetupPacket,
+ data_buffer:u64,
+ data_length:u16,
+)->Result<u64,&'static str> {
+ if slot==0 || slot as usize>=XHCI_MAX_SLOTS { return Err("invalid xHCI slot"); }
+ if controller.mmio_base==0 || controller.event_ring_phys==0 { return Err("xHCI controller is not running"); }
+ let ring=allocate_dma_page()?;
+ unsafe {
+  core::ptr::write_bytes(ring as *mut u8,0,XHCI_PAGE_SIZE as usize);
+  let (setup_trb,data_trb,status_trb)=control_transfer_trbs(setup,data_buffer,data_length);
+  let base=ring as *mut Trb;
+  core::ptr::write_volatile(base.add(0),setup_trb.with_cycle(true).with_cycle(true));
+  if let Some(data)=data_trb {
+   core::ptr::write_volatile(base.add(1),data.with_cycle(true));
+   core::ptr::write_volatile(base.add(2),status_trb.with_cycle(true));
+  } else {
+   core::ptr::write_volatile(base.add(1),status_trb.with_cycle(true));
+  }
+  // A transfer ring is a cyclic structure; the final TRB links back to
+  // the first TRB and toggles the cycle state on wrap.
+  let link_index=if data_trb.is_some(){3}else{2};
+  core::ptr::write_volatile(
+   base.add(XHCI_RING_TRBS-1),
+   Trb{parameter:ring,status:0,control:TRB_TYPE_LINK|TRB_CYCLE|(1<<1)},
+  );
+  ring_doorbell(controller.mmio_base,controller.capability,slot);
+ }
+ Ok(ring)
+}
