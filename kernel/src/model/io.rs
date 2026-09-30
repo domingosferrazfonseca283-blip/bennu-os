@@ -29,3 +29,19 @@ pub struct IoEnvelope { pub request:BlockRequest, pub completion:IoCompletion }
 impl IoEnvelope {
     pub const EMPTY: Self = Self { request:BlockRequest::EMPTY, completion:IoCompletion::EMPTY };
 }
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DeviceRequest {
+    pub device: ObjectId,
+    pub opcode: u32,
+    pub flags: u32,
+    pub argument: u64,
+    pub value: u64,
+    pub buffer: u64,
+    pub token: u64,
+}
+impl DeviceRequest {
+    pub const EMPTY: Self = Self { device:ObjectId::NULL, opcode:0, flags:0, argument:0, value:0, buffer:0, token:0 };
+    pub const fn is_valid(&self) -> bool { !self.device.is_null() && self.opcode != 0 && self.token != 0 }
+}
