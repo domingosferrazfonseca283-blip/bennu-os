@@ -14,6 +14,10 @@ pub mod io;
 pub mod filesystem;
 pub mod graphics;
 pub mod abi;
+pub mod pci;
+pub mod xhci;
+pub mod policy;
+pub mod clock;
 pub mod scheduler;
 pub mod runtime;
 
@@ -31,6 +35,10 @@ pub use io::{IoCompletion,IoEnvelope,IoState};
 pub use filesystem::{JournalOp,JournalRecord,Node,NodeKind,Superblock};
 pub use graphics::{Buffer,PixelFormat,Present};
 pub use abi::{Call,Operation,ResultCode,BENNU_ABI_MAJOR,BENNU_ABI_MINOR};
+pub use pci::{PciAddress,PciDevice};
+pub use xhci::{CapabilityRegisters,OperationalRegisters,Trb,XhciController};
+pub use policy::{AccessPolicy,StoragePolicy};
+pub use clock::{TimeSpec,Timer};
 
 pub const MAX_CELLS:usize=64;
 pub const MAX_OBJECTS:usize=256;
