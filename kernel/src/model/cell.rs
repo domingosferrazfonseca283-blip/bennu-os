@@ -35,6 +35,9 @@ pub struct Cell {
     pub entry: Option<CellEntry>,
     pub context: Context,
     pub address_space_root: u64,
+    pub kernel_stack_top: u64,
+    pub user_rip: u64,
+    pub user_rsp: u64,
     capabilities: [Capability; MAX_CAPABILITIES_PER_CELL],
     capability_generations: [u32; MAX_CAPABILITIES_PER_CELL],
     capability_count: usize,
@@ -49,6 +52,9 @@ impl Cell {
             entry: None,
             context: Context::EMPTY,
             address_space_root: 0,
+            kernel_stack_top: 0,
+            user_rip: 0,
+            user_rsp: 0,
             capabilities: [Capability::EMPTY; MAX_CAPABILITIES_PER_CELL],
             capability_generations: [0; MAX_CAPABILITIES_PER_CELL],
             capability_count: 0,
@@ -133,6 +139,17 @@ impl Cell {
     pub fn context(&self) -> Context { self.context }
 
     pub fn address_space_root(&self) -> u64 { self.address_space_root }
+
+    pub fn configure_user_entry(&mut self, rip: u64, rsp: u64) -> Result<(), &'static str> {
+        if rip == 0 || rsp == 0 { return Err("invalid user entry"); }
+        self.user_rip = rip;
+        self.user_rsp = rsp;
+        Ok(())
+    }
+
+    pub fn user_entry(&self) -> Option<(u64, u64)> {
+        if self.user_rip == 0 || self.user_rsp == 0 { None } else { Some((self.user_rip, self.user_rsp)) }
+    }
 
     pub fn attach_address_space_root(&mut self, root: u64) -> Result<(), &'static str> {
         if root == 0 || root & 0xfff != 0 {
