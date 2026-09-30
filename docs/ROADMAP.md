@@ -50,7 +50,9 @@
 - [x] descoberta PCI legada e identificação de xHCI
 - [x] descoberta real de portas xHCI e primitivas de reset/acknowledge
 - [ ] modelo de drivers baseado em Cells
-- [ ] acesso a dispositivos exclusivamente por Capability
+- [x] acesso a dispositivos exclusivamente por Capability
+- [x] fila nativa de DeviceRequest com validação de Capability
+- [x] fronteira ABI DeviceSubmit com buffer USER e comprimento validados
 - [ ] APIC/IOAPIC
 - [ ] interrupções MSI/MSI-X
 
@@ -61,6 +63,8 @@
 - [x] topologia USB: interfaces/endpoints e identificação Bulk-Only Mass Storage
 - [x] USB Mass Storage: CBW/CSW e comandos SCSI base
 - [ ] ligação física completa entre TRBs DMA e dispositivos USB
+- [ ] consumo da fila DeviceRequest pelo Device Fabric/xHCI
+- [ ] completions de DeviceRequest no Event Fabric
 - [ ] fila de requests de bloco assíncrona
 - [ ] BennuFS
 - [ ] journaling/recuperação
