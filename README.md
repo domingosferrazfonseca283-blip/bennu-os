@@ -21,23 +21,26 @@ O USB será tratado como plataforma de primeira classe, incluindo boot, armazena
 - kernel freestanding x86_64;
 - primeiro estágio de boot BIOS;
 - segundo estágio de boot com transição para long mode;
-- linker e target próprios;
-- imagem de disco inicial;
-- diagnóstico inicial do kernel;
+- GDT e IDT próprias;
+- BootInfo e mapa físico E820;
+- allocator inicial de frames físicos;
+- paging e heap iniciais;
+- Object/Cell/Capability/Event model inicial;
+- runtime de recursos sem alocação dinâmica;
 - arquitetura USB-first documentada.
 
 ## Próximos subsistemas
 
-1. GDT e IDT;
-2. exceções e interrupções;
-3. timer;
-4. memória física e paging;
-5. heap;
-6. drivers USB;
-7. armazenamento e BennuFS;
+1. completar memória virtual;
+2. tornar Objects/Cells/Events seguros para concorrência;
+3. execução real de Cells;
+4. controlador de interrupções e temporização;
+5. Resource Graph;
+6. dispositivos USB como Objects;
+7. armazenamento orientado a Objects;
 8. UEFI;
-9. userspace e segurança;
-10. GUI nativa.
+9. runtime nativo e aplicações;
+10. Surfaces e experiência gráfica.
 
 ## Princípio de segurança
 
