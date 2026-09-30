@@ -212,3 +212,20 @@ A delegação de autoridade segue uma regra de não escalada:
 - revogar a Capability original continua a invalidar somente aquela entrada, preservando a separação por geração.
 
 Assim, uma cadeia de delegações não pode transformar uma autoridade limitada em uma autoridade maior. A autoridade flui pelo Resource Graph, mas não cresce por delegação.
+
+
+## Device Fabric e I/O nativo
+
+O acesso a hardware não é uma chamada privilegiada genérica. `DeviceSubmit` segue a mesma cadeia fundamental do restante do sistema:
+
+`Cell → Capability → Device Object → Operation → Device I/O Queue → Completion/Event`
+
+A operação valida simultaneamente:
+
+- a Capability pertence à Cell chamadora e referencia o Object correto;
+- a Capability possui `DEVICE` e `WRITE`;
+- o Object referenciado é efetivamente do tipo `Device`;
+- a requisição possui opcode e token válidos;
+- a requisição é colocada na fila assíncrona do Device Fabric.
+
+A execução física do driver pode consumir essa fila posteriormente, sem conceder à Cell acesso direto a MMIO, PCI ou DMA. O próximo estágio é ligar essa fila aos registros concretos de `DeviceFabric`/xHCI e devolver completions através do Event Fabric.
