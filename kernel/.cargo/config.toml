@@ -1,0 +1,7 @@
+[build]
+target = "x86_64-bennu.json"
+
+[target.x86_64-bennu]
+rustflags = [
+  "-C", "link-arg=-Tkernel/linker.ld"
+]
