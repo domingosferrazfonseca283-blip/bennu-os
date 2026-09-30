@@ -47,7 +47,6 @@ pub use xhci::{CapabilityRegisters,OperationalRegisters,Trb,XhciController};
 pub use policy::{AccessPolicy,StoragePolicy};
 pub use clock::{TimeSpec,Timer};
 pub use device_fabric::{DeviceFabric,DeviceRecord};
-pub use event_port::EventPort;
 pub use process::Domain;
 
 pub const MAX_CELLS:usize=64;
