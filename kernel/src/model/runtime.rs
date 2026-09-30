@@ -23,59 +23,42 @@ pub fn init() {
         EVENT_TAIL = 0;
         NEXT_OBJECT = 1;
     }
+    super::graph::init();
+    super::surface::init();
 }
 
 pub fn create_object(kind: ObjectKind, owner: u32) -> Result<ObjectId, &'static str> {
     unsafe {
         for offset in 0..MAX_OBJECTS {
             let index = (NEXT_OBJECT + offset) % MAX_OBJECTS;
-            if index == 0 || OBJECTS[index].kind != ObjectKind::Empty {
-                continue;
-            }
-
+            if index == 0 || OBJECTS[index].kind != ObjectKind::Empty { continue; }
             let generation = OBJECT_GENERATIONS[index].wrapping_add(1).max(1);
             OBJECT_GENERATIONS[index] = generation;
             let id = ObjectId::new(index as u32, generation);
-            OBJECTS[index] = ResourceObject {
-                id,
-                kind,
-                owner,
-                flags: 0,
-            };
+            OBJECTS[index] = ResourceObject { id, kind, owner, flags: 0 };
             NEXT_OBJECT = (index + 1) % MAX_OBJECTS;
             let _ = emit(Event::new(EventKind::ResourceCreated, id, ObjectId::NULL, 0));
             return Ok(id);
         }
     }
-
     Err("object space exhausted")
 }
 
 pub fn create_cell(id: CellId, root: ObjectId) -> Result<(), &'static str> {
-    if root.is_null() {
-        return Err("cell requires a root object");
-    }
-
+    if root.is_null() { return Err("cell requires a root object"); }
     unsafe {
         let index = id.0 as usize;
-        if index >= MAX_CELLS || CELLS[index].state != CellState::Empty {
-            return Err("cell slot unavailable");
-        }
-        if !object_exists(root) {
-            return Err("cell root does not exist");
-        }
+        if index >= MAX_CELLS || CELLS[index].state != CellState::Empty { return Err("cell slot unavailable"); }
+        if !object_exists(root) { return Err("cell root does not exist"); }
         CELLS[index] = Cell::create(id, root);
     }
-
     Ok(())
 }
 
 pub fn bind_entry(cell: CellId, entry: super::CellEntry) -> Result<(), &'static str> {
     unsafe {
         let index = cell.0 as usize;
-        if index >= MAX_CELLS || CELLS[index].state == CellState::Empty {
-            return Err("cell does not exist");
-        }
+        if index >= MAX_CELLS || CELLS[index].state == CellState::Empty { return Err("cell does not exist"); }
         CELLS[index].bind_entry(entry)
     }
 }
@@ -83,51 +66,31 @@ pub fn bind_entry(cell: CellId, entry: super::CellEntry) -> Result<(), &'static 
 pub fn run_once(cell: CellId) -> Result<super::CellAction, &'static str> {
     unsafe {
         let index = cell.0 as usize;
-        if index >= MAX_CELLS || CELLS[index].state == CellState::Empty {
-            return Err("cell does not exist");
-        }
+        if index >= MAX_CELLS || CELLS[index].state == CellState::Empty { return Err("cell does not exist"); }
         CELLS[index].run_once()
     }
 }
 
-pub fn grant(
-    cell: CellId,
-    object: ObjectId,
-    rights: CapabilityRights,
-) -> Result<CapabilityId, &'static str> {
+pub fn grant(cell: CellId, object: ObjectId, rights: CapabilityRights) -> Result<CapabilityId, &'static str> {
     unsafe {
         let index = cell.0 as usize;
-        if index >= MAX_CELLS || CELLS[index].state == CellState::Empty {
-            return Err("cell does not exist");
-        }
-        if !object_exists(object) {
-            return Err("object does not exist");
-        }
+        if index >= MAX_CELLS || CELLS[index].state == CellState::Empty { return Err("cell does not exist"); }
+        if !object_exists(object) { return Err("object does not exist"); }
         CELLS[index].grant(object, rights)
     }
 }
 
-pub fn permits(
-    cell: CellId,
-    capability: CapabilityId,
-    object: ObjectId,
-    rights: CapabilityRights,
-) -> bool {
+pub fn permits(cell: CellId, capability: CapabilityId, object: ObjectId, rights: CapabilityRights) -> bool {
     unsafe {
         let index = cell.0 as usize;
-        if index >= MAX_CELLS || CELLS[index].state == CellState::Empty {
-            return false;
-        }
-        CELLS[index].permits(capability, object, rights)
+        index < MAX_CELLS && CELLS[index].state != CellState::Empty && CELLS[index].permits(capability, object, rights)
     }
 }
 
 pub fn emit(event: Event) -> Result<(), &'static str> {
     unsafe {
         let next = (EVENT_TAIL + 1) % EVENT_QUEUE_SIZE;
-        if next == EVENT_HEAD {
-            return Err("event fabric full");
-        }
+        if next == EVENT_HEAD { return Err("event fabric full"); }
         EVENTS[EVENT_TAIL] = event;
         EVENT_TAIL = next;
     }
@@ -136,9 +99,7 @@ pub fn emit(event: Event) -> Result<(), &'static str> {
 
 pub fn poll() -> Option<Event> {
     unsafe {
-        if EVENT_HEAD == EVENT_TAIL {
-            return None;
-        }
+        if EVENT_HEAD == EVENT_TAIL { return None; }
         let event = EVENTS[EVENT_HEAD];
         EVENT_HEAD = (EVENT_HEAD + 1) % EVENT_QUEUE_SIZE;
         Some(event)
@@ -146,14 +107,9 @@ pub fn poll() -> Option<Event> {
 }
 
 pub fn object_exists(id: ObjectId) -> bool {
-    if id.is_null() {
-        return false;
-    }
-
+    if id.is_null() { return false; }
     unsafe {
         let index = id.index();
-        index < MAX_OBJECTS
-            && OBJECTS[index].id == id
-            && OBJECTS[index].kind != ObjectKind::Empty
+        index < MAX_OBJECTS && OBJECTS[index].id == id && OBJECTS[index].kind != ObjectKind::Empty
     }
 }
