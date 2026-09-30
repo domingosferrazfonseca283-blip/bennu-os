@@ -40,14 +40,6 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         arch::diagnostics::write_line(1, b"BENNU MODEL: CAPABILITY GRAPH ONLINE");
     }
 
-    if model::runtime::bind_entry(model::CellId(1), bootstrap_cell).is_ok() {
-        match model::runtime::run_once(model::CellId(1)) {
-            Ok(model::CellAction::Stop) => arch::diagnostics::write_line(1, b"BENNU EXEC: CELL COMPLETED"),
-            Ok(_) => arch::diagnostics::write_line(1, b"BENNU EXEC: CELL YIELDED"),
-            Err(_) => arch::diagnostics::write_line(1, b"BENNU EXEC: CELL FAILED"),
-        }
-    }
-
     if boot_info.is_null() {
         arch::diagnostics::write_line(4, b"BENNU BOOT: NULL BOOT INFO");
         return;
@@ -69,6 +61,21 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
 
     unsafe { memory::heap::init(); }
     arch::diagnostics::write_line(6, b"BENNU MEMORY: KERNEL HEAP ONLINE");
+
+    if model::runtime::bind_entry(model::CellId(1), bootstrap_cell).is_err() {
+        arch::diagnostics::write_line(1, b"BENNU EXEC: CELL ENTRY BIND FAILED");
+        return;
+    }
+
+    if model::runtime::prepare_cell_context(
+        model::CellId(1),
+        model::scheduler::cell_trampoline as usize as u64,
+    ).is_err() {
+        arch::diagnostics::write_line(1, b"BENNU EXEC: CELL STACK PREP FAILED");
+        return;
+    }
+
+    arch::diagnostics::write_line(6, b"BENNU EXEC: NATIVE CELL CONTEXT ONLINE");
 
     if let Some(pci) = model::pci::find_xhci_legacy(32, 32, 8) {
         if let Some(mmio) = model::pci::first_mmio_bar(&pci) {
