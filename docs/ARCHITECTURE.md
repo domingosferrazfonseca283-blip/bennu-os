@@ -37,7 +37,10 @@ O bring-up x86_64 já possui uma fronteira clara entre o bootloader e o kernel:
 - o kernel instala sua própria IDT;
 - exceções iniciais têm handlers nativos;
 - diagnóstico pré-userspace usa VGA apenas como canal temporário;
-- o próximo salto é transformar o estado de CPU em infraestrutura de memória e interrupções.
+- Stage 2 publica um protocolo `BootInfo` próprio do Bennu;
+- o protocolo transporta o dispositivo de boot, localização/tamanho do kernel e o mapa físico E820;
+- o kernel já possui a primeira camada de alocação de frames físicos, recusando memória abaixo de 1 MiB e a região ocupada pelo próprio kernel;
+- o próximo salto é fazer o kernel assumir as próprias tabelas de páginas e construir o heap.
 
 A ABI de interrupção x86-interrupt do Rust é usada apenas na camada de baixo nível; ela não define a API pública do sistema operacional.
 
