@@ -62,6 +62,14 @@ impl AddressSpace {
         mapping_count: 0,
     };
 
+    pub fn attach_root(&mut self, id:AddressSpaceId, owner:ObjectId, root:u64) -> Result<(), &'static str> {
+        if root==0 || root % PAGE_SIZE != 0 { return Err("invalid address-space root"); }
+        self.id=id;
+        self.owner=owner;
+        self.root_table=root;
+        Ok(())
+    }
+
     pub fn map(&mut self, mapping: Mapping) -> Result<(), &'static str> {
         if mapping.pages == 0 || mapping.virtual_base % PAGE_SIZE != 0 || mapping.physical_base % PAGE_SIZE != 0 {
             return Err("unaligned mapping");
