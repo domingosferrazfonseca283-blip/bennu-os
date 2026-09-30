@@ -70,6 +70,26 @@ pub fn create_cell(id: CellId, root: ObjectId) -> Result<(), &'static str> {
     Ok(())
 }
 
+pub fn bind_entry(cell: CellId, entry: super::CellEntry) -> Result<(), &'static str> {
+    unsafe {
+        let index = cell.0 as usize;
+        if index >= MAX_CELLS || CELLS[index].state == CellState::Empty {
+            return Err("cell does not exist");
+        }
+        CELLS[index].bind_entry(entry)
+    }
+}
+
+pub fn run_once(cell: CellId) -> Result<super::CellAction, &'static str> {
+    unsafe {
+        let index = cell.0 as usize;
+        if index >= MAX_CELLS || CELLS[index].state == CellState::Empty {
+            return Err("cell does not exist");
+        }
+        CELLS[index].run_once()
+    }
+}
+
 pub fn grant(
     cell: CellId,
     object: ObjectId,
