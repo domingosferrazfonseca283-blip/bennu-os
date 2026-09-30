@@ -98,12 +98,9 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
         }
 
         Operation::CapabilityGrant => {
-            if !super::runtime::permits_any(cell, call.capability, call.object, &[R::SHARE, R::ADMIN]) {
-                return ResultCode::error(ABI_STATUS_DENIED);
-            }
             let target = super::CellId(call.argument as u32);
             let rights = R(call.value as u32);
-            match super::runtime::grant(target, call.object, rights) {
+            match super::runtime::delegate(cell, call.capability, target, call.object, rights) {
                 Ok(id) => ResultCode { status: ABI_STATUS_OK, value: id.0 },
                 Err(_) => ResultCode::error(ABI_STATUS_DENIED),
             }
