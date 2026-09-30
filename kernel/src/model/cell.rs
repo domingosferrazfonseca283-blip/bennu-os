@@ -35,6 +35,7 @@ pub struct Cell {
     pub entry: Option<CellEntry>,
     pub context: Context,
     capabilities: [Capability; MAX_CAPABILITIES_PER_CELL],
+    capability_generations: [u32; MAX_CAPABILITIES_PER_CELL],
     capability_count: usize,
 }
 
@@ -47,6 +48,7 @@ impl Cell {
             entry: None,
             context: Context::EMPTY,
             capabilities: [Capability::EMPTY; MAX_CAPABILITIES_PER_CELL],
+            capability_generations: [0; MAX_CAPABILITIES_PER_CELL],
             capability_count: 0,
         }
     }
@@ -59,6 +61,7 @@ impl Cell {
             entry: None,
             context: Context::EMPTY,
             capabilities: [Capability::EMPTY; MAX_CAPABILITIES_PER_CELL],
+            capability_generations: [0; MAX_CAPABILITIES_PER_CELL],
             capability_count: 0,
         }
     }
@@ -71,18 +74,18 @@ impl Cell {
         if object.is_null() {
             return Err("null object");
         }
-        if self.capability_count >= MAX_CAPABILITIES_PER_CELL {
-            return Err("cell capability table full");
-        }
-
-        let slot = self.capability_count;
-        let id = CapabilityId::new(object, slot as u32, 1);
+        let slot = (0..MAX_CAPABILITIES_PER_CELL)
+            .find(|&index| self.capabilities[index].id == CapabilityId::NULL)
+            .ok_or("cell capability table full")?;
+        let generation = self.capability_generations[slot].wrapping_add(1).max(1);
+        self.capability_generations[slot] = generation;
+        let id = CapabilityId::new(object, slot as u32, generation);
         self.capabilities[slot] = Capability {
             id,
             object,
             rights,
             owner_cell: self.id.0,
-            generation: 1,
+            generation,
         };
         self.capability_count += 1;
         Ok(id)
@@ -105,6 +108,17 @@ impl Cell {
 
     pub fn capability_count(&self) -> usize {
         self.capability_count
+    }
+
+    pub fn revoke(&mut self, capability: CapabilityId) -> Result<(), &'static str> {
+        for index in 0..MAX_CAPABILITIES_PER_CELL {
+            if self.capabilities[index].id == capability {
+                self.capabilities[index] = Capability::EMPTY;
+                self.capability_count -= 1;
+                return Ok(());
+            }
+        }
+        Err("capability not found")
     }
 
     pub fn set_context(&mut self, context: Context) -> Result<(), &'static str> {
