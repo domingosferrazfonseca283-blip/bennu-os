@@ -12,6 +12,7 @@ const PAGE_TABLE_ENTRIES: usize = 512;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const USER: u64 = 1 << 2;
+const NO_EXECUTE: u64 = 1u64 << 63;
 const HUGE_PAGE: u64 = 1 << 7;
 const BOOTSTRAP_LIMIT: u64 = 64 * 1024 * 1024;
 const IDENTITY_LIMIT: u64 = 64 * 1024 * 1024;
@@ -102,7 +103,7 @@ pub unsafe fn switch_address_space(root:u64) -> Result<(), &'static str> {
 }
 
 pub fn map_page_in_root(root: u64, virtual_address: u64, physical_frame: u64) -> Result<(), &'static str> {
-    map_page_in_root_with_flags(root, virtual_address, physical_frame, false, true)
+    map_page_in_root_with_flags(root, virtual_address, physical_frame, false, true, true)
 }
 
 pub fn map_user_page_in_root(
@@ -110,8 +111,9 @@ pub fn map_user_page_in_root(
     virtual_address: u64,
     physical_frame: u64,
     writable: bool,
+    executable: bool,
 ) -> Result<(), &'static str> {
-    map_page_in_root_with_flags(root, virtual_address, physical_frame, true, writable)
+    map_page_in_root_with_flags(root, virtual_address, physical_frame, true, writable, executable)
 }
 
 fn map_page_in_root_with_flags(
@@ -120,6 +122,7 @@ fn map_page_in_root_with_flags(
     physical_frame: u64,
     user: bool,
     writable: bool,
+    executable: bool,
 ) -> Result<(), &'static str> {
     if root == 0 || root & (PAGE_SIZE - 1) != 0 {
         return Err("invalid address-space root");
@@ -133,7 +136,7 @@ fn map_page_in_root_with_flags(
     let pd_index = ((virtual_address >> 21) & 0x1ff) as usize;
     let pt_index = ((virtual_address >> 12) & 0x1ff) as usize;
     let intermediate = PRESENT | WRITABLE | if user { USER } else { 0 };
-    let leaf = PRESENT | if writable { WRITABLE } else { 0 } | if user { USER } else { 0 };
+    let leaf = PRESENT | if writable { WRITABLE } else { 0 } | if user { USER } else { 0 } | if executable { 0 } else { NO_EXECUTE };
 
     unsafe {
         let pml4 = table_at(root);
