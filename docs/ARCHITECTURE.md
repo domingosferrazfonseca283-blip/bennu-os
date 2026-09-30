@@ -137,3 +137,8 @@ Internal storage is not implicitly eligible. The default policy permits the remo
 ## PCI Discovery
 
 The kernel contains a first legacy PCI configuration-space discovery path for x86_64. Discovered functions become Bennu Device Objects and emit DeviceAttached events. This is discovery only: BAR mapping, xHCI initialization, USB enumeration, and Mass Storage transport remain separate capabilities in the Device Fabric.
+
+
+## USB Controller Fabric
+
+PCI xHCI devices now expose their MMIO BAR as a hardware resource in the Device Fabric. The xHCI model contains capability-derived slot/port limits, command and event rings, TRB cycle state, and port state. These structures deliberately stop before direct MMIO access: the next hardware layer will map the controller region, perform controller reset, establish the Device Context Base Address Array, start the rings, and consume interrupt events.
