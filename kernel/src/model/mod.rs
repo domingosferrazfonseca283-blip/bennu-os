@@ -9,6 +9,11 @@ pub mod address_space;
 pub mod device;
 pub mod storage;
 pub mod usb;
+pub mod driver;
+pub mod io;
+pub mod filesystem;
+pub mod graphics;
+pub mod abi;
 pub mod scheduler;
 pub mod runtime;
 
@@ -21,6 +26,11 @@ pub use surface::Surface;
 pub use address_space::{AddressSpace,AddressSpaceId,Mapping,MappingKind};
 pub use storage::{BlockDevice,BlockGeometry,BlockKind,BlockOp,BlockRequest};
 pub use usb::{HostControllerKind,TransferKind,UsbAddress,UsbDeviceDescriptor,UsbEndpoint};
+pub use driver::{DriverBinding,DriverState};
+pub use io::{IoCompletion,IoEnvelope,IoState};
+pub use filesystem::{JournalOp,JournalRecord,Node,NodeKind,Superblock};
+pub use graphics::{Buffer,PixelFormat,Present};
+pub use abi::{Call,Operation,ResultCode,BENNU_ABI_MAJOR,BENNU_ABI_MINOR};
 
 pub const MAX_CELLS:usize=64;
 pub const MAX_OBJECTS:usize=256;
