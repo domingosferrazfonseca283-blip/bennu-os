@@ -153,6 +153,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     let mut scheduler = model::scheduler::Scheduler::new();
     loop {
         model::runtime::service_device_io();
+        model::runtime::service_device_events();
         if scheduler.step().is_none() {
             core::hint::spin_loop();
         }
