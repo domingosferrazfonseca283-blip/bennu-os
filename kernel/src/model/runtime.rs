@@ -323,6 +323,15 @@ pub fn revoke(cell: CellId, capability: CapabilityId) -> Result<(), &'static str
     state.cells[index].revoke(capability)
 }
 
+pub fn permits_any(cell: CellId, capability: CapabilityId, object: ObjectId, rights: &[CapabilityRights]) -> bool {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty { return false; }
+    for required in rights { if state.cells[index].permits(capability, object, *required) { return true; } }
+    false
+}
+
 pub fn permits(cell: CellId, capability: CapabilityId, object: ObjectId, rights: CapabilityRights) -> bool {
     let guard = RUNTIME.lock();
     let state = guard.get();
