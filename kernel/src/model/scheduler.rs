@@ -5,6 +5,11 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 static CURRENT_CELL: AtomicU32 = AtomicU32::new(u32::MAX);
 
+pub fn current_cell() -> Option<CellId> {
+    let id = CURRENT_CELL.load(Ordering::Acquire);
+    if id == u32::MAX { None } else { Some(CellId(id)) }
+}
+
 /// Entry trampoline for native Bennu Cell execution.
 ///
 /// A Cell owns its stack and returns to the scheduler only through the
