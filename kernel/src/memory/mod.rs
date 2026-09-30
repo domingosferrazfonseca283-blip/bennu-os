@@ -108,14 +108,29 @@ pub fn region_count() -> usize {
 }
 
 /// Allocate one 4 KiB physical frame.
+///
+/// Frames are returned in ascending physical order. The first implementation
+/// intentionally has no freeing operation; reclamation arrives with the
+/// virtual-memory and process subsystems.
 pub fn allocate_frame() -> Option<u64> {
+    allocate_frame_below(u64::MAX)
+}
+
+/// Allocate one frame below a physical-address limit.
+///
+/// This is used during paging bootstrap because the bootloader initially
+/// identity-maps only the first 2 MiB.
+pub fn allocate_frame_below(limit: u64) -> Option<u64> {
     unsafe {
         for index in 0..REGION_COUNT {
             let region = &mut REGIONS[index];
-            if region.next < region.end {
+            if region.next < region.end && region.next < limit {
                 let frame = region.next;
-                region.next = region.next.saturating_add(PAGE_SIZE);
-                return Some(frame);
+                let next = region.next.saturating_add(PAGE_SIZE);
+                if next <= limit || frame < limit {
+                    region.next = next;
+                    return Some(frame);
+                }
             }
         }
     }
