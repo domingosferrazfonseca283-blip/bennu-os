@@ -11,6 +11,7 @@ pub mod storage;
 pub mod usb;
 pub mod driver;
 pub mod io;
+pub mod io_fabric;
 pub mod filesystem;
 pub mod graphics;
 pub mod abi;
@@ -37,6 +38,7 @@ pub use usb::{HostControllerKind,TransferKind,UsbAddress,UsbDeviceDescriptor,Usb
 pub use device::{DeviceClass,DeviceDescriptor};
 pub use driver::{DriverBinding,DriverState};
 pub use io::{IoCompletion,IoEnvelope,IoState,IoStatus};
+pub use io_fabric::{begin_next,complete,init as init_io_fabric,queued,submit as submit_block_io};
 pub use filesystem::{JournalOp,JournalRecord,Node,NodeKind,Superblock};
 pub use graphics::{Buffer,PixelFormat,Present};
 pub use abi::{Call,Operation,ResultCode,BENNU_ABI_MAJOR,BENNU_ABI_MINOR};
