@@ -76,7 +76,7 @@ impl Cell {
         }
 
         let slot = self.capability_count;
-        let id = CapabilityId::new(object, slot as u32);
+        let id = CapabilityId::new(object, slot as u32, 1);
         self.capabilities[slot] = Capability {
             id,
             object,
