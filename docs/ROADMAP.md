@@ -13,9 +13,11 @@
 - [x] GDT própria do kernel
 - [x] IDT própria do kernel
 - [x] primeira camada de exceções CPU
-- [ ] interrupções externas
-- [ ] PIC/APIC
-- [ ] timer HPET/PIT/APIC
+- [x] interrupções externas (IRQ0)
+- [x] PIC 8259A inicial
+- [x] timer PIT a 100 Hz
+- [ ] APIC/IOAPIC
+- [ ] timer HPET/APIC
 - [ ] memória física
 - [ ] paging
 - [ ] heap do kernel
