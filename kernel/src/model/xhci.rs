@@ -177,7 +177,7 @@ pub unsafe fn start_controller(controller:&mut XhciController,cap:CapabilityRegi
     let ir0=rt+0x20;
     core::ptr::write_volatile((ir0+0x08) as *mut u64,controller.erst_phys);
     core::ptr::write_volatile((ir0+0x10) as *mut u64,controller.event_ring_phys);
-    core::ptr::write_volatile((ir0+0x0c) as *mut u32,1);
+    core::ptr::write_volatile((ir0+0x08-8) as *mut u32,1);
     write32(op,0,read32(op,0)|USBCMD_RUN_STOP);
     for _ in 0..1_000_000 { if read32(op,4)&USBSTS_HCH==0 { controller.initialized=true; return Ok(()); } core::hint::spin_loop(); }
     Err("xHCI failed to start")
