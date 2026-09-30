@@ -82,6 +82,61 @@ pub fn create_cell(id: CellId, root: ObjectId) -> Result<(), &'static str> {
     Ok(())
 }
 
+pub fn entry(cell: CellId) -> Option<super::CellEntry> {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
+        return None;
+    }
+    state.cells[index].entry
+}
+
+pub fn context_ptr(cell: CellId) -> Option<*mut crate::arch::x86_64::execution::Context> {
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
+        return None;
+    }
+    Some(&mut state.cells[index].context as *mut _)
+}
+
+pub fn prepare_cell_context(cell: CellId, trampoline: u64) -> Result<(), &'static str> {
+    let stack = crate::memory::allocate_frame_below(crate::memory::PAGE_SIZE * 16384)
+        .ok_or("no physical frame for cell stack")?;
+
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
+        return Err("cell does not exist");
+    }
+    unsafe {
+        crate::arch::x86_64::execution::prepare_context(
+            &mut state.cells[index].context,
+            stack,
+            trampoline,
+        )?;
+    }
+    Ok(())
+}
+
+pub fn finish_cell(cell: CellId, action: super::CellAction) -> Result<(), &'static str> {
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
+        return Err("cell does not exist");
+    }
+    state.cells[index].state = match action {
+        super::CellAction::Yield => CellState::Ready,
+        super::CellAction::Wait => CellState::Waiting,
+        super::CellAction::Stop => CellState::Stopped,
+    };
+    Ok(())
+}
+
 pub fn bind_entry(cell: CellId, entry: super::CellEntry) -> Result<(), &'static str> {
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
