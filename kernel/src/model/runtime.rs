@@ -130,6 +130,16 @@ pub fn grant(cell: CellId, object: ObjectId, rights: CapabilityRights) -> Result
     state.cells[index].grant(object, rights)
 }
 
+pub fn revoke(cell: CellId, capability: CapabilityId) -> Result<(), &'static str> {
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
+        return Err("cell does not exist");
+    }
+    state.cells[index].revoke(capability)
+}
+
 pub fn permits(cell: CellId, capability: CapabilityId, object: ObjectId, rights: CapabilityRights) -> bool {
     let guard = RUNTIME.lock();
     let state = guard.get();
