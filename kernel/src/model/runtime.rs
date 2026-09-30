@@ -116,6 +116,7 @@ pub fn prepare_cell_context(cell: CellId, trampoline: u64) -> Result<(), &'stati
     }
 
     state.cells[index].attach_address_space_root(root)?;
+    state.cells[index].kernel_stack_top = stack.checked_add(crate::memory::PAGE_SIZE).ok_or("cell kernel stack overflow")?;
 
     unsafe {
         crate::arch::x86_64::execution::prepare_context(
@@ -125,6 +126,29 @@ pub fn prepare_cell_context(cell: CellId, trampoline: u64) -> Result<(), &'stati
         )?;
     }
     Ok(())
+}
+
+pub fn configure_user_entry(cell: CellId, rip: u64, rsp: u64) -> Result<(), &'static str> {
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty { return Err("cell does not exist"); }
+    state.cells[index].configure_user_entry(rip, rsp)
+}
+
+pub fn user_entry(cell: CellId) -> Option<(u64, u64)> {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty { return None; }
+    state.cells[index].user_entry()
+}
+
+pub fn kernel_stack_top(cell: CellId) -> Option<u64> {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty { None } else { Some(state.cells[index].kernel_stack_top) }
 }
 
 pub fn finish_cell(cell: CellId, action: super::CellAction) -> Result<(), &'static str> {
