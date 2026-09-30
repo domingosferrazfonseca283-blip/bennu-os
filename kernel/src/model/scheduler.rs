@@ -18,6 +18,9 @@ pub fn current_cell() -> Option<CellId> {
 pub extern "C" fn cell_trampoline() -> ! {
     loop {
         let id = CellId(CURRENT_CELL.load(Ordering::Acquire));
+        if let Some((rip, rsp)) = super::runtime::user_entry(id) {
+            unsafe { crate::arch::x86_64::userspace::enter(rip, rsp); }
+        }
         let entry = match super::runtime::entry(id) {
             Some(entry) => entry,
             None => {
