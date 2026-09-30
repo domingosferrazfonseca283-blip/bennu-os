@@ -97,7 +97,7 @@ impl Cell {
         object: ObjectId,
         rights: CapabilityRights,
     ) -> bool {
-        for index in 0..self.capability_count {
+        for index in 0..MAX_CAPABILITIES_PER_CELL {
             let entry = &self.capabilities[index];
             if entry.id == capability && entry.permits(self.id.0, object, rights) {
                 return true;
