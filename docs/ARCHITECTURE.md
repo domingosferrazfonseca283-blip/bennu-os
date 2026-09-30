@@ -197,3 +197,18 @@ A stack de kernel da Cell permanece mapeada como supervisor-only no espaço da p
 O kernel não deve dereferenciar diretamente ponteiros fornecidos pela ABI. A camada de memória oferece tradução validada de páginas USER e primitivas copy_from_user / copy_to_user, verificando canonicalidade, presença da página, bit USER e, para escrita, WRITABLE.
 
 O primeiro backend de MemoryMap segue a mesma regra: somente Memory/Data Objects com Capability contendo MAP podem ser mapeados. Uma escrita exige também WRITE. O endereço físico não é fornecido pela Cell; o backing frame pertence ao Object e é resolvido pelo runtime.
+
+
+## Delegação de Capabilities
+
+A delegação de autoridade segue uma regra de não escalada:
+
+- a Cell delegante identifica a Capability-fonte e o Object ao qual ela se refere;
+- uma Capability com `SHARE` só pode delegar direitos que já estejam contidos na própria Capability-fonte;
+- uma Capability com `ADMIN` pode atuar como autoridade administrativa para delegação;
+- direitos desconhecidos são rejeitados pela ABI;
+- a Cell de destino precisa existir antes da delegação;
+- a Capability derivada recebe uma nova geração e um novo slot na tabela da Cell de destino;
+- revogar a Capability original continua a invalidar somente aquela entrada, preservando a separação por geração.
+
+Assim, uma cadeia de delegações não pode transformar uma autoridade limitada em uma autoridade maior. A autoridade flui pelo Resource Graph, mas não cresce por delegação.
