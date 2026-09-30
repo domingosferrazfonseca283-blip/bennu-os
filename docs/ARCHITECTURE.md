@@ -79,3 +79,50 @@ A primeira plataforma-alvo é x86_64. QEMU é um ambiente de validação durante
 ## Regra de engenharia
 
 Nenhum componente de alto nível deve exigir Linux para funcionar. Ferramentas externas podem ser usadas durante o desenvolvimento, mas o sistema final deve possuir suas próprias abstrações.
+
+
+## Expansão arquitetural atual
+
+A arquitetura está a evoluir para uma cadeia de recursos única:
+
+```
+Hardware → Objects → Capabilities → Cells → Events
+                    ↓             ↓
+              Resource Graph   Domains
+                    ↓             ↓
+             Device Fabric   Address Spaces
+                    ↓
+              Async I/O Fabric
+                    ↓
+             USB / Block Storage
+                    ↓
+                  BennuFS
+                    ↓
+             Surfaces / Buffers
+                    ↓
+              Bennu Applications
+```
+
+Foram adicionados modelos nativos para PCI, xHCI, USB, block I/O, drivers, event ports, Address Spaces, Domains, BennuFS e buffers gráficos.
+
+O armazenamento segue uma política explícita: dispositivos internos não recebem autoridade implícita. Um dispositivo deve ser descoberto como Object e a sua utilização deve atravessar uma Capability e a política de armazenamento do sistema.
+
+A camada de armazenamento é desenhada para I/O assíncrono. Requests de bloco, envelopes de I/O e completions são objetos de protocolo; drivers serão Cells que consomem esses protocolos.
+
+BennuFS não trata caminhos e ficheiros como a primitiva arquitetural central. A representação persistente é baseada em Objects/Nodes, relações de parentagem e um journal transacional. Uma interface de ficheiros poderá existir por conveniência no runtime, mas será uma visão sobre Objects persistentes.
+
+A camada gráfica segue a mesma regra: buffers e surfaces são Objects com autoridade explícita. O compositor futuro será uma composição de Cells e Events, não um subsistema externo obrigatório.
+
+## Execution Fabric
+
+O scheduler já é orientado pelo relógio PIT e só executa uma Cell quando existe um tick pendente. A troca completa de contexto CPU ainda é uma etapa separada: o snapshot atual não é declarado como context switch seguro.
+
+A implementação futura do contexto deverá definir explicitamente:
+- conjunto de registradores preservados;
+- stack de entrada e retorno;
+- trampoline de Cell;
+- política de interrupções;
+- relação entre Context e Address Space;
+- comportamento de yield, wait, wake e stop.
+
+Isso mantém a fronteira entre o modelo conceptual de Cell e os mecanismos internos necessários para executar código com segurança.
