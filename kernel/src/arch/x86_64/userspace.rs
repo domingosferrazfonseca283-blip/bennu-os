@@ -2,8 +2,8 @@
 
 use crate::memory::{allocate_frame_below, paging};
 
-pub const USER_CODE: u64 = 0x0000_0000_4000_0000;
-pub const USER_STACK: u64 = 0x0000_0000_8000_0000;
+pub const USER_CODE: u64 = 0x0000_0080_0000_0000;
+pub const USER_STACK: u64 = 0x0000_0080_0000_1000;
 pub const USER_STACK_TOP: u64 = USER_STACK + paging::PAGE_SIZE;
 
 extern "C" {
@@ -33,7 +33,7 @@ pub fn install(cell: crate::model::CellId, root: u64) -> Result<(), &'static str
         let code = code_frame as *mut u8;
         core::ptr::write_bytes(code, 0x90, paging::PAGE_SIZE as usize);
         core::ptr::write(code.add(0), 0xB8);
-        core::ptr::write(code.add(1) as *mut u32, 9u32);
+        core::ptr::write_unaligned(code.add(1) as *mut u32, 9u32);
         core::ptr::write(code.add(5), 0xCD);
         core::ptr::write(code.add(6), 0x80);
         core::ptr::write(code.add(7), 0xEB);
