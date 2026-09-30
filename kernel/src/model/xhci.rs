@@ -82,15 +82,23 @@ pub struct XhciRing {
 impl XhciRing {
  pub const EMPTY:Self=Self{trbs:[Trb::EMPTY;XHCI_RING_TRBS],enqueue:0,dequeue:0,cycle:true};
  pub fn reset(&mut self){*self=Self::EMPTY;}
- pub fn push(&mut self,trb:Trb)->Result<(),&'static str>{
-  let next=(self.enqueue+1)%XHCI_RING_TRBS;
+ pub fn push_with_index(&mut self,trb:Trb)->Result<usize,&'static str>{
+  if self.enqueue==XHCI_RING_TRBS-1 { self.enqueue=0; self.cycle=!self.cycle; }
+  let next=(self.enqueue+1)%(XHCI_RING_TRBS-1);
   if next==self.dequeue{return Err("xHCI ring full");}
-  self.trbs[self.enqueue]=trb.with_cycle(self.cycle);
-  self.enqueue=next; Ok(())
+  let index=self.enqueue;
+  self.trbs[index]=trb.with_cycle(self.cycle);
+  self.enqueue=next;
+  Ok(index)
+ }
+ pub fn push(&mut self,trb:Trb)->Result<(),&'static str>{
+  self.push_with_index(trb).map(|_|())
  }
  pub fn pop(&mut self)->Option<Trb>{
   if self.dequeue==self.enqueue{return None;}
-  let trb=self.trbs[self.dequeue]; self.dequeue=(self.dequeue+1)%XHCI_RING_TRBS; Some(trb)
+  let trb=self.trbs[self.dequeue];
+  self.dequeue=(self.dequeue+1)%(XHCI_RING_TRBS-1);
+  Some(trb)
  }
 }
 
@@ -112,6 +120,8 @@ pub struct XhciController {
  pub command_ring:XhciRing,pub event_ring:XhciRing,pub ports_state:[XhciPort;XHCI_MAX_PORTS],
  pub capability:CapabilityRegisters,
  pub next_slot:u8,
+ pub event_dequeue:usize,
+ pub event_cycle:bool,
 }
 impl XhciController {
  pub const EMPTY:Self=Self{
@@ -119,6 +129,8 @@ impl XhciController {
   dcbaa_phys:0,command_ring_phys:0,event_ring_phys:0,erst_phys:0,
   command_ring:XhciRing::EMPTY,event_ring:XhciRing::EMPTY,
   next_slot:1,
+  event_dequeue:0,
+  event_cycle:true,
   ports_state:[XhciPort::empty(0);XHCI_MAX_PORTS],
   capability:CapabilityRegisters{cap_length:0,version:0,hcs_params1:0,hcs_params2:0,hcs_params3:0,hcc_params1:0,dboff:0,rtsoff:0,hcc_params2:0},
  };
@@ -229,7 +241,7 @@ pub unsafe fn setup_dma(controller:&mut XhciController)->Result<(),&'static str>
     core::ptr::write_bytes(command as *mut u8,0,4096);
     core::ptr::write_bytes(event as *mut u8,0,4096);
     core::ptr::write_bytes(erst as *mut u8,0,4096);
-    let link=Trb{parameter:command,status:0,control:TRB_TYPE_LINK|1};
+    let link=Trb{parameter:command,status:0,control:TRB_TYPE_LINK|0x3};
     core::ptr::write_volatile((command as *mut Trb).add(XHCI_RING_TRBS-1),link);
     let segment=EventRingSegment{base:event,size:(XHCI_RING_TRBS-1) as u16,reserved:0};
     core::ptr::write_volatile(erst as *mut EventRingSegment,segment);
@@ -282,8 +294,25 @@ impl XhciEvent {
  pub const fn port_id(&self)->u8 { ((self.trb.parameter>>24)&0xff) as u8 }
 }
 
+pub unsafe fn poll_event(controller:&mut XhciController)->Option<XhciEvent> {
+ if controller.event_ring_phys==0 || controller.mmio_base==0 { return controller.event_ring.pop().map(|trb|XhciEvent{trb}); }
+ let trb_ptr=(controller.event_ring_phys as *const Trb).add(controller.event_dequeue);
+ let trb=core::ptr::read_volatile(trb_ptr);
+ let cycle=trb.control & 1 != 0;
+ if cycle != controller.event_cycle { return None; }
+ controller.event_dequeue += 1;
+ if controller.event_dequeue >= XHCI_RING_TRBS-1 {
+  controller.event_dequeue=0;
+  controller.event_cycle=!controller.event_cycle;
+ }
+ let rt=controller.mmio_base + controller.capability.rtsoff as u64;
+ let erdp=controller.event_ring_phys + (controller.event_dequeue as u64)*core::mem::size_of::<Trb>() as u64;
+ core::ptr::write_volatile((rt+0x20+0x18) as *mut u64,erdp | (1u64<<3));
+ Some(XhciEvent{trb})
+}
+
 pub fn consume_event(controller:&mut XhciController)->Option<XhciEvent> {
- controller.event_ring.pop().map(|trb|XhciEvent{trb})
+ unsafe { poll_event(controller) }
 }
 
 pub fn handle_event(controller:&mut XhciController,event:XhciEvent)->Option<u8> {
@@ -305,8 +334,24 @@ pub fn handle_event(controller:&mut XhciController,event:XhciEvent)->Option<u8> 
 }
 
 pub fn enable_slot_trb()->Trb { Trb{parameter:0,status:0,control:TRB_TYPE_ENABLE_SLOT} }
-pub fn enqueue_enable_slot(controller:&mut XhciController)->Result<(),&'static str>{ controller.command_ring.push(enable_slot_trb()) }
-pub fn enqueue_address_device(controller:&mut XhciController,input_context:u64,slot:u8)->Result<(),&'static str>{ controller.command_ring.push(address_device_trb(input_context,slot)) }
+pub fn enqueue_enable_slot(controller:&mut XhciController)->Result<u64,&'static str>{
+ let index=controller.command_ring.push_with_index(enable_slot_trb())?;
+ unsafe {
+  let physical=(controller.command_ring_phys as *mut Trb).add(index);
+  core::ptr::write_volatile(physical,controller.command_ring.trbs[index]);
+  ring_doorbell(controller.mmio_base,controller.capability,0);
+ }
+ Ok(controller.command_ring_phys + (index as u64)*core::mem::size_of::<Trb>() as u64)
+}
+pub fn enqueue_address_device(controller:&mut XhciController,input_context:u64,slot:u8)->Result<u64,&'static str>{
+ let index=controller.command_ring.push_with_index(address_device_trb(input_context,slot))?;
+ unsafe {
+  let physical=(controller.command_ring_phys as *mut Trb).add(index);
+  core::ptr::write_volatile(physical,controller.command_ring.trbs[index]);
+  ring_doorbell(controller.mmio_base,controller.capability,0);
+ }
+ Ok(controller.command_ring_phys + (index as u64)*core::mem::size_of::<Trb>() as u64)
+}
 
 pub fn address_device_trb(input_context:u64,slot:u8)->Trb {
  Trb{parameter:input_context,status:0,control:TRB_TYPE_ADDRESS_DEVICE|((slot as u32)<<24)}
