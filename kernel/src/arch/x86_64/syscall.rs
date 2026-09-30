@@ -67,9 +67,12 @@ struct RegisterFrame {
 }
 
 #[no_mangle]
-extern "C" fn bennu_syscall_yield() -> ! {
-    unsafe { let _ = crate::arch::x86_64::execution::switch_back_to_scheduler(); }
-    loop { core::hint::spin_loop(); }
+extern "C" fn bennu_syscall_yield() {
+    unsafe {
+        if crate::arch::x86_64::execution::switch_back_to_scheduler().is_err() {
+            loop { core::hint::spin_loop(); }
+        }
+    }
 }
 
 #[no_mangle]
