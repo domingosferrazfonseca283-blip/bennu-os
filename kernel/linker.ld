@@ -1,4 +1,4 @@
-ENTRY(bennu_kernel_entry)
+ENTRY(kmain)
 
 SECTIONS
 {
@@ -6,7 +6,6 @@ SECTIONS
 
     .text : ALIGN(4K)
     {
-        KEEP(*(.text.boot))
         *(.text .text.*)
     }
 
