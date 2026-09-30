@@ -32,6 +32,15 @@ impl IdtEntry {
         self.offset_high = (address >> 32) as u32;
         self.reserved = 0;
     }
+
+    fn set_user_address(&mut self, address: u64) {
+        self.offset_low = address as u16;
+        self.selector = super::gdt::KERNEL_CODE_SELECTOR;
+        self.options = 0xEE00;
+        self.offset_mid = (address >> 16) as u16;
+        self.offset_high = (address >> 32) as u32;
+        self.reserved = 0;
+    }
 }
 
 #[repr(C, packed)]
@@ -129,6 +138,10 @@ pub fn init() {
 
         IDT[3].set_address(breakpoint_handler as usize as u64);
         IDT[32].set_address(timer_handler as usize as u64);
+        extern "C" {
+            fn bennu_syscall_entry();
+        }
+        IDT[0x80].set_user_address(bennu_syscall_entry as usize as u64);
         IDT[8].set_address(
             double_fault_handler as DivergingHandlerWithError as usize as u64,
         );
