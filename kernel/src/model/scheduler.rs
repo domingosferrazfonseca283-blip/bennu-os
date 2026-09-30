@@ -16,6 +16,12 @@ pub fn current_cell() -> Option<CellId> {
 /// execution fabric. The trampoline is deliberately small: obtain the entry,
 /// execute it, publish the resulting state, then yield the CPU stack.
 pub extern "C" fn cell_trampoline() -> ! {
+    unsafe {
+        if crate::memory::paging::switch_address_space(crate::memory::paging::kernel_root()).is_err() {
+            loop { core::hint::spin_loop(); }
+        }
+    }
+
     loop {
         let id = CellId(CURRENT_CELL.load(Ordering::Acquire));
         if let Some((rip, rsp)) = super::runtime::user_entry(id) {
