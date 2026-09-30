@@ -25,6 +25,12 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
 
     arch::diagnostics::write_line(1, b"BENNU MODEL: OBJECT + CELL ENGINE ONLINE");
 
+    if let Ok(device) = model::runtime::create_object(model::ObjectKind::Device, 0) {
+        let _ = model::graph::link(root, device, model::RelationKind::Contains);
+        let _ = model::runtime::grant(model::CellId(1), device, model::CapabilityRights::OBSERVE);
+        arch::diagnostics::write_line(1, b"BENNU MODEL: ROOT CAPABILITY ONLINE");
+    }
+
     if boot_info.is_null() {
         arch::diagnostics::write_line(4, b"BENNU BOOT: NULL BOOT INFO");
         return;
