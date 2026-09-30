@@ -7,13 +7,14 @@ pub const USER_STACK: u64 = 0x0000_0080_0000_1000;
 pub const USER_STACK_TOP: u64 = USER_STACK + paging::PAGE_SIZE;
 
 extern "C" {
-    fn bennu_enter_user(rip: u64, rsp: u64) -> !;
+    fn bennu_enter_user(rip: u64, rsp: u64, root: u64) -> !;
 }
 
 core::arch::global_asm!(r#"
 .global bennu_enter_user
 .type bennu_enter_user,@function
 bennu_enter_user:
+    mov cr3, rdx
     mov ax, 0x23
     mov ds, ax
     mov es, ax
@@ -43,9 +44,22 @@ pub fn install(cell: crate::model::CellId, root: u64) -> Result<(), &'static str
 
     paging::map_user_page_in_root(root, USER_CODE, code_frame, false, true)?;
     paging::map_user_page_in_root(root, USER_STACK, stack_frame, true, false)?;
+
+    let syscall = crate::arch::x86_64::syscall::entry_address();
+    let syscall_page = syscall & !(paging::PAGE_SIZE - 1);
+    if syscall_page >= 64 * 1024 * 1024 {
+        return Err("syscall entry is outside bootstrap kernel mapping");
+    }
+    paging::map_supervisor_page_in_root(root, syscall_page, syscall_page, false, true)?;
     crate::model::runtime::configure_user_entry(cell, USER_CODE, USER_STACK_TOP)
 }
 
 pub unsafe fn enter(rip: u64, rsp: u64) -> ! {
-    bennu_enter_user(rip, rsp)
+    let root = crate::model::scheduler::current_cell()
+        .and_then(crate::model::runtime::cell_address_space_root)
+        .unwrap_or(0);
+    if root == 0 {
+        loop { core::hint::spin_loop(); }
+    }
+    bennu_enter_user(rip, rsp, root)
 }
