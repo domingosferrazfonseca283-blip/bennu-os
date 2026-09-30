@@ -88,7 +88,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         Some(_) => model::runtime::cell_address_space_root(model::CellId(2)).unwrap_or(0),
         None => 0,
     };
-    if user_root == 0 || model::arch_user_install(user_root).is_err() {
+    if user_root == 0 || arch_user_install(user_root).is_err() {
         arch::diagnostics::write_line(1, b"BENNU USER: ADDRESS SPACE INSTALL FAILED");
         return;
     }
