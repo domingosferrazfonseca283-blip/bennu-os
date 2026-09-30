@@ -65,8 +65,8 @@
 - [ ] ligação física completa entre TRBs DMA e dispositivos USB
 - [x] consumo da fila DeviceRequest pelo Device Fabric/xHCI
 - [x] Device Fabric persistente no runtime
-- [ ] confirmação de DeviceRequest pelo Event Ring xHCI
-- [ ] completions de DeviceRequest no Event Fabric
+- [x] confirmação de DeviceRequest pelo Event Ring xHCI
+- [x] completions de DeviceRequest no Event Fabric
 - [ ] fila de requests de bloco assíncrona
 - [ ] BennuFS
 - [ ] journaling/recuperação
