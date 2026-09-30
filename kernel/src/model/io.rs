@@ -1,4 +1,8 @@
-use super::{BlockRequest, IoState, ObjectId};
+use super::{BlockRequest, ObjectId};
+
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum IoState { Empty=0, Queued=1, Running=2, Completed=3, Failed=4 }
 
 #[repr(u32)]
 #[derive(Clone, Copy, PartialEq, Eq)]
