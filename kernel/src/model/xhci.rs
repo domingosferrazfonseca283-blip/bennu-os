@@ -130,6 +130,7 @@ pub struct XhciController {
  pub next_slot:u8,
  pub event_dequeue:usize,
  pub event_cycle:bool,
+ pub slot_transfer_ring:[u64;XHCI_MAX_SLOTS],
 }
 impl XhciController {
  pub const EMPTY:Self=Self{
@@ -139,6 +140,7 @@ impl XhciController {
   next_slot:1,
   event_dequeue:0,
   event_cycle:true,
+  slot_transfer_ring:[0;XHCI_MAX_SLOTS],
   ports_state:[XhciPort::empty(0);XHCI_MAX_PORTS],
   capability:CapabilityRegisters{cap_length:0,version:0,hcs_params1:0,hcs_params2:0,hcs_params3:0,hcc_params1:0,dboff:0,rtsoff:0,hcc_params2:0},
  };
