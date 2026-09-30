@@ -27,7 +27,7 @@ impl BlockDevice {
         object:ObjectId::NULL, kind:BlockKind::Unknown, geometry:BlockGeometry::EMPTY,
         removable:false, writable:false,
     };
-    pub const fn is_usb_storage(&self) -> bool { self.kind == BlockKind::UsbMassStorage && self.removable }
+    pub fn is_usb_storage(&self) -> bool { self.kind == BlockKind::UsbMassStorage && self.removable }
 }
 
 #[repr(u8)]
