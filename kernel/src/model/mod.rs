@@ -34,7 +34,7 @@ pub use graph::{Relation,RelationKind};
 pub use surface::Surface;
 pub use address_space::{AddressSpace,AddressSpaceId,Mapping,MappingKind};
 pub use storage::{BlockDevice,BlockGeometry,BlockKind,BlockOp,BlockRequest};
-pub use usb::{HostControllerKind,TransferKind,UsbAddress,UsbDeviceDescriptor,UsbEndpoint};
+pub use usb::{HostControllerKind,TransferKind,UsbAddress,UsbDeviceDescriptor,UsbEndpoint,UsbConfiguration,UsbDevice};
 pub use device::{DeviceClass,DeviceDescriptor};
 pub use driver::{DriverBinding,DriverState};
 pub use io::{IoCompletion,IoEnvelope,IoState,IoStatus};
