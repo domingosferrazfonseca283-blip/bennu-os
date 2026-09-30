@@ -281,3 +281,8 @@ A primeira família de transferências nativas usa três estágios:
 A Transfer Ring é DMA-backed, termina com Link TRB e é acionada pelo doorbell do slot. O endereço físico do primeiro TRB é preservável para correlação posterior com um Transfer Event.
 
 Isto ainda não significa enumeração USB completa. O próximo passo é manter persistentemente os transfer rings por slot/endpoint, correlacionar `TRANSFER_EVENT` com requests pendentes e então executar `GET_DESCRIPTOR`, `SET_ADDRESS` e `SET_CONFIGURATION`. Só depois disso a camada Bulk-Only Mass Storage poderá transportar CBW/CSW e SCSI sobre os endpoints reais.
+
+
+### Correlação de Transfer Events
+
+O Device Fabric mantém uma tabela persistente de transferências EP0. Cada operação guarda o slot, token e a região física da Transfer Ring. Quando o Event Ring entrega um `TRANSFER_EVENT`, o runtime correlaciona o ponteiro do TRB e o slot com a operação pendente e publica `DeviceCompleted`. O desenho mantém a identidade da operação no token da Capability/Cell, sem expor ponteiros físicos ao userspace.
