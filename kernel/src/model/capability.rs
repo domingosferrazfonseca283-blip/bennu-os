@@ -27,9 +27,18 @@ impl CapabilityRights {
     pub const MAP:Self=Self(1<<6);
     pub const DEVICE:Self=Self(1<<7);
     pub const ADMIN:Self=Self(1<<31);
+
+    pub const KNOWN_MASK:Self=Self(
+        Self::READ.0 | Self::WRITE.0 | Self::EXECUTE.0 | Self::OBSERVE.0 |
+        Self::DRAW.0 | Self::SHARE.0 | Self::MAP.0 | Self::DEVICE.0 | Self::ADMIN.0
+    );
+
     pub const fn contains(self,required:Self)->bool{(self.0&required.0)==required.0}
     pub const fn union(self,other:Self)->Self{Self(self.0|other.0)}
+    pub const fn is_valid(self)->bool{(self.0 & !Self::KNOWN_MASK.0)==0}
+    pub const fn is_subset_of(self,parent:Self)->bool{(self.0 & !parent.0)==0}
 }
+
 #[repr(C)]#[derive(Clone,Copy)]
 pub struct Capability {
     pub id:CapabilityId,pub object:ObjectId,pub rights:CapabilityRights,
