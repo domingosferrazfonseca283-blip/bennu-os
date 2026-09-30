@@ -1,3 +1,5 @@
+use core::ptr;
+
 core::arch::global_asm!(r#"
 .global bennu_context_switch
 .type bennu_context_switch,@function
@@ -29,18 +31,53 @@ pub struct Context {
 
 impl Context {
     pub const EMPTY: Self = Self { stack_pointer: 0, instruction_pointer: 0, flags: 0x202 };
+
     pub const fn new(stack_pointer: u64, instruction_pointer: u64) -> Self {
         Self { stack_pointer, instruction_pointer, flags: 0x202 }
     }
+
     pub const fn is_initialized(&self) -> bool {
         self.stack_pointer != 0 && self.instruction_pointer != 0
     }
-    pub const fn with_stack(stack_pointer:u64,instruction_pointer:u64)->Self {
-        Self{stack_pointer,instruction_pointer,flags:0x202}
+
+    pub const fn with_stack(stack_pointer: u64, instruction_pointer: u64) -> Self {
+        Self { stack_pointer, instruction_pointer, flags: 0x202 }
     }
 }
 
-/// Diagnostic CPU snapshot. It is not yet a resumable Cell context.
+static mut SCHEDULER_CONTEXT: Context = Context::EMPTY;
+static mut CURRENT_CELL_CONTEXT: *mut Context = ptr::null_mut();
+
+/// Prepare a fresh kernel stack for the Bennu Cell context-switch ABI.
+///
+/// The assembly switcher restores six SysV callee-saved registers and then
+/// executes ret. The prepared stack therefore contains those six slots plus
+/// the first return address (the Cell trampoline).
+pub unsafe fn prepare_context(
+    context: &mut Context,
+    stack_frame: u64,
+    trampoline: u64,
+) -> Result<(), &'static str> {
+    if stack_frame == 0 || stack_frame & 0xfff != 0 {
+        return Err("cell stack is not page aligned");
+    }
+    if trampoline == 0 {
+        return Err("cell trampoline is null");
+    }
+
+    let stack_top = stack_frame.checked_add(4096).ok_or("cell stack overflow")?;
+    let sp = (stack_top.saturating_sub(7 * core::mem::size_of::<u64>() as u64)) & !0xf;
+    let slots = sp as *mut u64;
+
+    for index in 0..6 {
+        ptr::write_volatile(slots.add(index), 0);
+    }
+    ptr::write_volatile(slots.add(6), trampoline);
+
+    *context = Context::new(sp, trampoline);
+    Ok(())
+}
+
 #[inline]
 pub fn capture_current() -> Context {
     let stack_pointer: u64;
@@ -66,14 +103,31 @@ pub fn interrupts_enabled() -> bool {
     capture_current().flags & (1 << 9) != 0
 }
 
-
 extern "C" {
-    fn bennu_context_switch(old_stack:*mut u64,new_stack:*const u64);
+    fn bennu_context_switch(old_stack: *mut u64, new_stack: *const u64);
 }
 
 /// Switches the kernel execution stack between two prepared Cell contexts.
-/// The first implementation preserves the SysV callee-saved register set.
 #[inline]
-pub unsafe fn switch_stack(old:&mut Context,new:&Context) {
-    bennu_context_switch(&mut old.stack_pointer,&new.stack_pointer);
+pub unsafe fn switch_stack(old: &mut Context, new: &Context) {
+    bennu_context_switch(&mut old.stack_pointer, &new.stack_pointer);
+}
+
+/// Enter a Cell and return here when the Cell yields.
+pub unsafe fn switch_to_cell(context: *mut Context) -> Result<(), &'static str> {
+    if context.is_null() || !(*context).is_initialized() {
+        return Err("cell context is not initialized");
+    }
+    CURRENT_CELL_CONTEXT = context;
+    switch_stack(&mut SCHEDULER_CONTEXT, &*context);
+    Ok(())
+}
+
+/// Return from a Cell to the scheduler stack.
+pub unsafe fn switch_back_to_scheduler() -> Result<(), &'static str> {
+    if CURRENT_CELL_CONTEXT.is_null() {
+        return Err("no current cell context");
+    }
+    switch_stack(&mut *CURRENT_CELL_CONTEXT, &SCHEDULER_CONTEXT);
+    Ok(())
 }
