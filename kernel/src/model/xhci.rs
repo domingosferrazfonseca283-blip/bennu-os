@@ -103,7 +103,7 @@ unsafe fn write32(base:u64,offset:u64,value:u32) {
 pub unsafe fn probe_mmio(mmio:u64)->CapabilityRegisters {
     CapabilityRegisters {
         cap_length:read32(mmio,0) as u8,
-        version:(read32(mmio,2) & 0xffff) as u16,
+        version:core::ptr::read_volatile((mmio + 2) as *const u16),
         hcs_params1:read32(mmio,4),
         hcs_params2:read32(mmio,8),
         hcs_params3:read32(mmio,12),
