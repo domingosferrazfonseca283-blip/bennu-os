@@ -37,3 +37,29 @@ impl DeviceFabric {
   self.controllers[self.controller_count]=controller;self.controller_count+=1;Ok(())
  }
 }
+
+
+impl DeviceFabric {
+ pub fn contains(&self, object:ObjectId)->bool {
+  for i in 0..self.device_count { if self.devices[i].descriptor.object==object { return true; } }
+  false
+ }
+ pub fn submit(&mut self, request:&super::DeviceRequest)->Result<(),&'static str> {
+  for i in 0..self.device_count {
+   if self.devices[i].descriptor.object != request.device { continue; }
+   if self.devices[i].descriptor.class == DeviceClass::UsbController {
+    for c in 0..self.controller_count {
+     if self.controllers[c].object != request.device { continue; }
+     return match request.opcode {
+      1 => super::xhci::enqueue_enable_slot(&mut self.controllers[c]),
+      2 => Err("xHCI address-device requires input context"),
+      _ => Err("unsupported xHCI device operation"),
+     };
+    }
+    return Err("xHCI controller not registered");
+   }
+   return Err("device class has no native executor");
+  }
+  Err("device not registered in fabric")
+ }
+}
