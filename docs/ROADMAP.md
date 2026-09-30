@@ -25,7 +25,8 @@
 - [x] runtime inicial de Objects/Cells/Capabilities
 - [ ] memória virtual completa
 - [ ] proteção e sincronização do estado global
-- [ ] execução real de Cells
+- [x] execução cooperativa mínima de Cells
+- [ ] contexto de CPU por Cell
 - [ ] preempção orientada a eventos
 - [ ] afinidade e recursos por Cell
 
