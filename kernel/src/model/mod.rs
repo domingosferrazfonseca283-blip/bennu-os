@@ -2,6 +2,7 @@ pub mod capability;
 pub mod cell;
 pub mod event;
 pub mod object;
+pub mod runtime;
 
 pub use capability::{Capability, CapabilityId, CapabilityRights};
 pub use cell::{Cell, CellId, CellState};
