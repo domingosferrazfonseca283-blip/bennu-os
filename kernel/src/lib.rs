@@ -125,15 +125,14 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
             match memory::paging::map_mmio(mmio, 64 * 1024) {
                 Ok(mapped) => {
                     let cap = unsafe { model::xhci::probe_mmio(mapped) };
-                    let mut fabric = model::DeviceFabric::empty();
-                    if fabric.register_pci(pci, model::DeviceClass::UsbController).is_ok() {
+                    if model::runtime::register_device_fabric_pci(pci, model::DeviceClass::UsbController).is_ok() {
                         let mut controller = model::XhciController::EMPTY;
                         controller.object = pci.object;
                         if controller.configure(cap, mapped).is_ok() {
                             let reset = unsafe { model::xhci::reset_controller(mapped, cap) };
                             let dma = if reset.is_ok() { unsafe { model::xhci::setup_dma(&mut controller) } } else { Err("reset failed") };
                             let start = if dma.is_ok() { unsafe { model::xhci::start_controller(&mut controller, cap) } } else { Err("DMA setup failed") };
-                            if start.is_ok() && fabric.register_xhci(controller).is_ok() {
+                            if start.is_ok() && model::runtime::register_xhci_controller(controller).is_ok() {
                                 arch::diagnostics::write_line(6, b"BENNU USB: xHCI DMA + RINGS ONLINE");
                             } else {
                                 arch::diagnostics::write_line(5, b"BENNU USB: xHCI DMA/START FAILED");
@@ -153,6 +152,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
 
     let mut scheduler = model::scheduler::Scheduler::new();
     loop {
+        model::runtime::service_device_io();
         if scheduler.step().is_none() {
             core::hint::spin_loop();
         }
