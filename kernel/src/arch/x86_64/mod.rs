@@ -6,6 +6,7 @@ pub mod pit;
 pub mod pic;
 pub mod io;
 pub mod syscall;
+pub mod userspace;
 
 pub fn init() {
     gdt::init();
