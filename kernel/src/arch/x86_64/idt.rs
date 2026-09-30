@@ -68,6 +68,11 @@ extern "x86-interrupt" fn breakpoint_handler(frame: InterruptStackFrame) {
     super::diagnostics::write_line(1, b"BENNU BREAKPOINT");
 }
 
+extern "x86-interrupt" fn timer_handler(frame: InterruptStackFrame) {
+    let _ = frame;
+    super::pit::on_interrupt();
+}
+
 extern "x86-interrupt" fn double_fault_handler(
     frame: InterruptStackFrame,
     error_code: u64,
@@ -123,6 +128,7 @@ pub fn init() {
         }
 
         IDT[3].set_address(breakpoint_handler as usize as u64);
+        IDT[32].set_address(timer_handler as usize as u64);
         IDT[8].set_address(
             double_fault_handler as DivergingHandlerWithError as usize as u64,
         );
