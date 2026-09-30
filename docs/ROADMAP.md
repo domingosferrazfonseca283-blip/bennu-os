@@ -13,13 +13,15 @@
 - [x] GDT própria do kernel
 - [x] IDT própria do kernel
 - [x] primeira camada de exceções CPU
-- [x] interrupções externas (IRQ0)
-- [x] PIC 8259A inicial
-- [x] timer PIT a 100 Hz
+- [ ] interrupções externas (IRQ0)
+- [ ] PIC 8259A inicial
+- [ ] timer PIT a 100 Hz
 - [ ] APIC/IOAPIC
 - [ ] timer HPET/APIC
-- [ ] memória física
-- [ ] paging
+- [x] protocolo Bennu BootInfo
+- [x] recolha inicial do mapa físico E820
+- [x] allocator inicial de frames físicos
+- [ ] paging gerido pelo kernel
 - [ ] heap do kernel
 - [ ] scheduler
 - [ ] processos e threads
