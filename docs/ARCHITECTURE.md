@@ -157,3 +157,17 @@ A execução do Bennu já possui uma fronteira explícita entre o scheduler e as
 - permissões supervisor/user, NX, regiões de kernel partilhadas controladamente e mapeamentos de objetos por Capability continuam a ser trabalho futuro.
 
 Isto mantém a identidade arquitetural do Bennu: a unidade pública de execução é a **Cell**, não um processo tradicional. O scheduler é uma implementação interna do Execution Fabric.
+
+
+## ABI nativa e fronteira de chamadas
+
+O Bennu agora possui uma primeira fronteira de chamada nativa x86_64 em int 0x80:
+
+- a entrada é um stub assembly que preserva os registos da Cell;
+- os argumentos são convertidos para o tipo Call da ABI Bennu;
+- o dispatcher identifica a Operation;
+- operações protegidas passam pela validação de Capability antes de tocar no recurso;
+- o resultado regressa pelo mesmo frame de registos;
+- o vetor é exposto como gate utilizável por código de nível utilizador quando existirem Cells em CPL3.
+
+A implementação atual é deliberadamente pequena. ObjectQuery e EventEmit já possuem caminhos concretos; as restantes operações continuam explícitas como não suportadas até terem semântica e validação completas.
