@@ -5,10 +5,12 @@ use core::panic::PanicInfo;
 
 #[no_mangle]
 pub extern "C" fn kmain() -> ! {
+    const MESSAGE: &[u8] = b"BENNU OS KERNEL OK";
+
     unsafe {
         let vga = 0xb8000 as *mut u8;
-        let msg = b"BENNU OS KERNEL OK";
-        for (i, byte) in msg.iter().enumerate() {
+
+        for (i, byte) in MESSAGE.iter().enumerate() {
             vga.add(i * 2).write_volatile(*byte);
             vga.add(i * 2 + 1).write_volatile(0x0f);
         }
