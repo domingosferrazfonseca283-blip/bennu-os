@@ -142,3 +142,18 @@ The kernel contains a first legacy PCI configuration-space discovery path for x8
 ## USB Controller Fabric
 
 PCI xHCI devices now expose their MMIO BAR as a hardware resource in the Device Fabric. The xHCI model contains capability-derived slot/port limits, command and event rings, TRB cycle state, and port state. These structures deliberately stop before direct MMIO access: the next hardware layer will map the controller region, perform controller reset, establish the Device Context Base Address Array, start the rings, and consume interrupt events.
+
+
+## Execução nativa de Cells
+
+A execução do Bennu já possui uma fronteira explícita entre o scheduler e as Cells:
+
+- cada Cell executável recebe uma stack de kernel própria;
+- a troca de contexto preserva o conjunto callee-saved da ABI x86_64;
+- a entrada da Cell passa por um trampoline nativo que devolve o controlo ao scheduler através do Execution Fabric;
+- cada Cell executável recebe uma raiz de espaço de endereçamento própria;
+- a entrada numa Cell muda o CR3 para a sua raiz e o retorno ao scheduler restaura a raiz do kernel;
+- a raiz da Cell é inicialmente derivada do espaço do kernel, portanto este passo fornece isolamento estrutural de raízes, mas **ainda não constitui isolamento de memória de utilizador completo**;
+- permissões supervisor/user, NX, regiões de kernel partilhadas controladamente e mapeamentos de objetos por Capability continuam a ser trabalho futuro.
+
+Isto mantém a identidade arquitetural do Bennu: a unidade pública de execução é a **Cell**, não um processo tradicional. O scheduler é uma implementação interna do Execution Fabric.
