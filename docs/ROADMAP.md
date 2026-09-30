@@ -27,7 +27,13 @@
 - [x] sincronização base do runtime
 - [x] scheduler cooperativo inicial
 - [x] contexto de CPU com troca real de contexto entre stacks de Cell
-- [ ] memória virtual completa (isolamento de utilizador, permissões e reclamação)
+- [x] raízes independentes de espaço de endereçamento por Cell
+- [x] Ring 3 com GDT/TSS e entrada via iretq
+- [x] páginas USER com permissões de escrita e NX
+- [x] stack de kernel por Cell para transição Ring 3 → Ring 0
+- [x] ABI nativa acessível por `int 0x80`
+- [x] yield de userspace para o scheduler e retorno a Ring 3
+- [ ] memória virtual completa (reclamação, copy-in/copy-out e proteção avançada)
 - [x] raízes de espaço de memória independentes por Cell
 - [ ] preempção orientada a eventos
 - [ ] afinidade e quotas de recursos por Cell
@@ -71,6 +77,8 @@
 - [ ] recuperação
 
 ## Fase 4 — Userspace
+- [x] primeira Cell real em Ring 3
+- [x] fronteira Ring 3 → kernel → Ring 3
 - [ ] init
 - [ ] API nativa de Objects/Capabilities/Cells/Events
 - [ ] runtime Bennu
