@@ -34,6 +34,7 @@ pub struct Cell {
     pub root: ObjectId,
     pub entry: Option<CellEntry>,
     pub context: Context,
+    pub address_space_root: u64,
     capabilities: [Capability; MAX_CAPABILITIES_PER_CELL],
     capability_generations: [u32; MAX_CAPABILITIES_PER_CELL],
     capability_count: usize,
@@ -47,6 +48,7 @@ impl Cell {
             root: ObjectId::NULL,
             entry: None,
             context: Context::EMPTY,
+            address_space_root: 0,
             capabilities: [Capability::EMPTY; MAX_CAPABILITIES_PER_CELL],
             capability_generations: [0; MAX_CAPABILITIES_PER_CELL],
             capability_count: 0,
@@ -60,6 +62,7 @@ impl Cell {
             root,
             entry: None,
             context: Context::EMPTY,
+            address_space_root: 0,
             capabilities: [Capability::EMPTY; MAX_CAPABILITIES_PER_CELL],
             capability_generations: [0; MAX_CAPABILITIES_PER_CELL],
             capability_count: 0,
@@ -128,6 +131,16 @@ impl Cell {
     }
 
     pub fn context(&self) -> Context { self.context }
+
+    pub fn address_space_root(&self) -> u64 { self.address_space_root }
+
+    pub fn attach_address_space_root(&mut self, root: u64) -> Result<(), &'static str> {
+        if root == 0 || root & 0xfff != 0 {
+            return Err("invalid Cell address-space root");
+        }
+        self.address_space_root = root;
+        Ok(())
+    }
 
     pub fn bind_entry(&mut self, entry: CellEntry) -> Result<(), &'static str> {
         if self.state == CellState::Empty || self.state == CellState::Stopped {
