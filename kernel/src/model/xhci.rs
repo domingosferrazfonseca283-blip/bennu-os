@@ -240,6 +240,8 @@ pub fn handle_event(controller:&mut XhciController,event:XhciEvent)->Option<u8> 
 }
 
 pub fn enable_slot_trb()->Trb { Trb{parameter:0,status:0,control:TRB_TYPE_ENABLE_SLOT} }
+pub fn enqueue_enable_slot(controller:&mut XhciController)->Result<(),&'static str>{ controller.command_ring.push(enable_slot_trb()) }
+pub fn enqueue_address_device(controller:&mut XhciController,input_context:u64,slot:u8)->Result<(),&'static str>{ controller.command_ring.push(address_device_trb(input_context,slot)) }
 
 pub fn address_device_trb(input_context:u64,slot:u8)->Trb {
  Trb{parameter:input_context,status:0,control:TRB_TYPE_ADDRESS_DEVICE|((slot as u32)<<24)}
