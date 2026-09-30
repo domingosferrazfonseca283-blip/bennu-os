@@ -8,6 +8,15 @@ pub const XHCI_DMA_LIMIT:u64=64*1024*1024;
 pub const TRB_TYPE_LINK:u32=6<<10;
 pub const TRB_TYPE_ENABLE_SLOT:u32=9<<10;
 pub const TRB_TYPE_NOOP_CMD:u32=23<<10;
+pub const TRB_TYPE_TRANSFER_EVENT:u32=32<<10;
+pub const TRB_TYPE_CMD_COMPLETION:u32=33<<10;
+pub const TRB_TYPE_PORT_STATUS:u32=34<<10;
+pub const TRB_TYPE_ENABLE_SLOT:u32=9<<10;
+pub const TRB_TYPE_ADDRESS_DEVICE:u32=11<<10;
+pub const TRB_TYPE_SETUP_STAGE:u32=2<<10;
+pub const TRB_TYPE_DATA_STAGE:u32=3<<10;
+pub const TRB_TYPE_STATUS_STAGE:u32=4<<10;
+pub const TRB_COMPLETION_CODE_SHIFT:u32=24;
 
 pub const USBCMD_RUN_STOP:u32=1<<0;
 pub const USBCMD_HCRST:u32=1<<1;
@@ -72,7 +81,7 @@ impl XhciRing {
 
 #[repr(C)]
 #[derive(Clone,Copy)]
-pub struct XhciPort { pub index:u8,pub status:u32,pub connected:bool,pub enabled:bool }
+pub struct XhciPort { pub index:u8,pub status:u32,pub connected:bool,pub enabled:bool,pub slot:u8 }
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -80,13 +89,15 @@ pub struct XhciController {
  pub object:ObjectId,pub mmio_base:u64,pub slots:u16,pub ports:u8,pub initialized:bool,
  pub dcbaa_phys:u64,pub command_ring_phys:u64,pub event_ring_phys:u64,pub erst_phys:u64,
  pub command_ring:XhciRing,pub event_ring:XhciRing,pub ports_state:[XhciPort;XHCI_MAX_PORTS],
+ pub next_slot:u8,
 }
 impl XhciController {
  pub const EMPTY:Self=Self{
   object:ObjectId::NULL,mmio_base:0,slots:0,ports:0,initialized:false,
   dcbaa_phys:0,command_ring_phys:0,event_ring_phys:0,erst_phys:0,
   command_ring:XhciRing::EMPTY,event_ring:XhciRing::EMPTY,
-  ports_state:[XhciPort{index:0,status:0,connected:false,enabled:false};XHCI_MAX_PORTS],
+  next_slot:1,
+  ports_state:[XhciPort{index:0,status:0,connected:false,enabled:false,slot:0};XHCI_MAX_PORTS],
  };
  pub fn configure(&mut self,cap:CapabilityRegisters,mmio_base:u64)->Result<(),&'static str>{
   if mmio_base==0{return Err("xHCI MMIO base missing");}
@@ -181,4 +192,64 @@ pub unsafe fn start_controller(controller:&mut XhciController,cap:CapabilityRegi
     write32(op,0,read32(op,0)|USBCMD_RUN_STOP);
     for _ in 0..1_000_000 { if read32(op,4)&USBSTS_HCH==0 { controller.initialized=true; return Ok(()); } core::hint::spin_loop(); }
     Err("xHCI failed to start")
+}
+
+
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct UsbSetupPacket {
+ pub request_type:u8,pub request:u8,pub value:u16,pub index:u16,pub length:u16,
+}
+impl UsbSetupPacket {
+ pub const fn get_descriptor(kind:u8,index:u8,length:u16)->Self {
+  Self{request_type:0x80,request:6,value:((kind as u16)<<8)|index as u16,index:0,length}
+ }
+}
+
+#[derive(Clone,Copy)]
+pub struct XhciEvent {
+ pub trb:Trb,
+}
+impl XhciEvent {
+ pub const fn event_type(&self)->u32 { self.trb.control & 0x3f00 }
+ pub const fn completion_code(&self)->u8 { ((self.trb.status >> TRB_COMPLETION_CODE_SHIFT)&0xff) as u8 }
+ pub const fn slot_id(&self)->u8 { ((self.trb.control>>24)&0xff) as u8 }
+ pub const fn port_id(&self)->u8 { ((self.trb.parameter>>24)&0xff) as u8 }
+}
+
+pub fn consume_event(controller:&mut XhciController)->Option<XhciEvent> {
+ controller.event_ring.pop().map(|trb|XhciEvent{trb})
+}
+
+pub fn handle_event(controller:&mut XhciController,event:XhciEvent)->Option<u8> {
+ match event.event_type() {
+  TRB_TYPE_PORT_STATUS => {
+   let port=event.port_id();
+   if port==0 || port as usize>XHCI_MAX_PORTS { return None; }
+   let state=&mut controller.ports_state[(port-1) as usize];
+   state.status=event.trb.status;
+   state.connected=true;
+   Some(port)
+  }
+  TRB_TYPE_CMD_COMPLETION => {
+   let slot=event.slot_id();
+   if slot!=0 { Some(slot) } else { None }
+  }
+  _=>None,
+ }
+}
+
+pub fn enable_slot_trb()->Trb { Trb{parameter:0,status:0,control:TRB_TYPE_ENABLE_SLOT} }
+
+pub fn address_device_trb(input_context:u64,slot:u8)->Trb {
+ Trb{parameter:input_context,status:0,control:TRB_TYPE_ADDRESS_DEVICE|((slot as u32)<<24)}
+}
+
+pub fn setup_stage_trb(setup:UsbSetupPacket,transfer_type:u32)->Trb {
+ let packed=(setup.request_type as u64)
+  |((setup.request as u64)<<8)
+  |((setup.value as u64)<<16)
+  |((setup.index as u64)<<32)
+  |((setup.length as u64)<<48);
+ Trb{parameter:packed,status:0,control:TRB_TYPE_SETUP_STAGE|transfer_type}
 }
