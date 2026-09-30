@@ -346,6 +346,27 @@ pub fn emit(event: Event) -> Result<(), &'static str> {
     emit_unlocked(guard.get_mut(), event)
 }
 
+pub fn poll_for_object(object: ObjectId) -> Option<Event> {
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+    let mut cursor = state.event_head;
+    while cursor != state.event_tail {
+        let event = state.events[cursor];
+        if event.source == object || event.target == object {
+            let mut current = cursor;
+            while current != state.event_head {
+                let previous = if current == 0 { EVENT_QUEUE_SIZE - 1 } else { current - 1 };
+                state.events[current] = state.events[previous];
+                current = previous;
+            }
+            state.event_head = (state.event_head + 1) % EVENT_QUEUE_SIZE;
+            return Some(event);
+        }
+        cursor = (cursor + 1) % EVENT_QUEUE_SIZE;
+    }
+    None
+}
+
 pub fn poll() -> Option<Event> {
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
