@@ -94,6 +94,17 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     }
     arch::diagnostics::write_line(6, b"BENNU USER: RING3 CELL ONLINE");
 
+    if let Ok(memory_object) = model::runtime::create_object(model::ObjectKind::Memory, 2) {
+        let _ = model::runtime::grant(
+            model::CellId(2),
+            memory_object,
+            model::CapabilityRights::READ
+                .union(model::CapabilityRights::WRITE)
+                .union(model::CapabilityRights::MAP),
+        );
+        arch::diagnostics::write_line(6, b"BENNU USER: MEMORY OBJECT + MAP CAPABILITY ONLINE");
+    }
+
     if model::runtime::bind_entry(model::CellId(1), bootstrap_cell).is_err() {
         arch::diagnostics::write_line(1, b"BENNU EXEC: CELL ENTRY BIND FAILED");
         return;
