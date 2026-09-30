@@ -3,6 +3,12 @@ use super::{DeviceClass,DeviceDescriptor,ObjectId,PciDevice,XhciController};
 pub const MAX_DEVICES:usize=128;
 pub const MAX_CONTROLLERS:usize=16;
 pub const MAX_PENDING_COMMANDS:usize=64;
+pub const MAX_PENDING_TRANSFERS:usize=64;
+
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct PendingTransfer { pub valid:bool,pub device:ObjectId,pub token:u64,pub slot:u8,pub ring:u64 }
+impl PendingTransfer { pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,slot:0,ring:0}; }
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -28,9 +34,10 @@ pub struct DeviceFabric {
  pub device_count:usize,
  pub controller_count:usize,
  pub pending:[PendingCommand;MAX_PENDING_COMMANDS],
+ pub transfers:[PendingTransfer;MAX_PENDING_TRANSFERS],
 }
 impl DeviceFabric {
- pub const fn empty()->Self{Self{devices:[DeviceRecord::EMPTY;MAX_DEVICES],controllers:[XhciController::EMPTY;MAX_CONTROLLERS],device_count:0,controller_count:0,pending:[PendingCommand::EMPTY;MAX_PENDING_COMMANDS]}}
+ pub const fn empty()->Self{Self{devices:[DeviceRecord::EMPTY;MAX_DEVICES],controllers:[XhciController::EMPTY;MAX_CONTROLLERS],device_count:0,controller_count:0,pending:[PendingCommand::EMPTY;MAX_PENDING_COMMANDS],transfers:[PendingTransfer::EMPTY;MAX_PENDING_TRANSFERS]}}
  pub fn register_pci(&mut self,pci:PciDevice,class:DeviceClass)->Result<ObjectId,&'static str>{
   if self.device_count>=MAX_DEVICES{return Err("device fabric full");}
   let object=pci.object;
@@ -76,7 +83,7 @@ impl DeviceFabric {
        };
        Ok(())
       },
-      2 => Err("xHCI address-device requires input context"),
+      2 => { let slot=request.value as u8; let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,super::xhci::UsbSetupPacket::get_descriptor(1,0,18),request.buffer,18)?; let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?; self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring}; Ok(()) },
       _ => Err("unsupported xHCI device operation"),
      };
     }
@@ -92,6 +99,7 @@ impl DeviceFabric {
    if event.is_none() { continue; }
    let event=event.unwrap();
    match event.event_type() {
+    super::xhci::TRB_TYPE_TRANSFER_EVENT => { let ptr=event.trb.parameter & !0xFu64; for p in 0..MAX_PENDING_TRANSFERS { if self.transfers[p].valid && self.transfers[p].slot==event.slot_id() && ptr>=self.transfers[p].ring && ptr<self.transfers[p].ring+48 { let t=self.transfers[p]; self.transfers[p]=PendingTransfer::EMPTY; return Some((t.device,t.token,event.slot_id(),event.completion_code())); } } }
     super::xhci::TRB_TYPE_CMD_COMPLETION => {
      let command_trb=event.trb.parameter & !0xFu64;
      for p in 0..MAX_PENDING_COMMANDS {
