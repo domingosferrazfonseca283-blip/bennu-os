@@ -93,3 +93,15 @@ pub fn discover_legacy(bus_limit:u8, device_limit:u8, function_limit:u8) -> usiz
 }
 
 pub const fn xhci_class() -> (u8,u8,u8) { (0x0c,0x03,0x30) }
+
+pub const fn bar_is_mmio(bar:u64) -> bool { bar & 1 == 0 }
+pub const fn bar_address(bar:u64) -> u64 { bar & 0xffff_fff0 }
+pub const fn is_xhci(device:&PciDevice) -> bool {
+    device.class == 0x0c && device.subclass == 0x03 && device.prog_if == 0x30
+}
+pub fn first_mmio_bar(device:&PciDevice) -> Option<u64> {
+    for bar in device.bars {
+        if bar != 0 && bar_is_mmio(bar) { return Some(bar_address(bar)); }
+    }
+    None
+}
