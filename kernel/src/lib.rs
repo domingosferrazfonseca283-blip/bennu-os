@@ -94,6 +94,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         }
     } else {
         arch::diagnostics::write_line(6, b"BENNU USB: NO xHCI CONTROLLER");
+    }
 
     arch::enable_interrupts();
     arch::diagnostics::write_line(6, b"BENNU KERNEL: INTERRUPTS ENABLED");
