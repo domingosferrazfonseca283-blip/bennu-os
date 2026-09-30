@@ -81,10 +81,12 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
                         controller.object = pci.object;
                         if controller.configure(cap, mapped).is_ok() {
                             let reset = unsafe { model::xhci::reset_controller(mapped, cap) };
-                            if reset.is_ok() && fabric.register_xhci(controller).is_ok() {
-                                arch::diagnostics::write_line(6, b"BENNU USB: xHCI CONTROLLER READY");
+                            let dma = if reset.is_ok() { unsafe { model::xhci::setup_dma(&mut controller) } } else { Err("reset failed") };
+                            let start = if dma.is_ok() { unsafe { model::xhci::start_controller(&mut controller, cap) } } else { Err("DMA setup failed") };
+                            if start.is_ok() && fabric.register_xhci(controller).is_ok() {
+                                arch::diagnostics::write_line(6, b"BENNU USB: xHCI DMA + RINGS ONLINE");
                             } else {
-                                arch::diagnostics::write_line(5, b"BENNU USB: xHCI RESET FAILED");
+                                arch::diagnostics::write_line(5, b"BENNU USB: xHCI DMA/START FAILED");
                             }
                         }
                     }
