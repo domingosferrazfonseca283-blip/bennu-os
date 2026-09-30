@@ -16,6 +16,14 @@ pub const TRB_TYPE_SETUP_STAGE:u32=2<<10;
 pub const TRB_TYPE_DATA_STAGE:u32=3<<10;
 pub const TRB_TYPE_STATUS_STAGE:u32=4<<10;
 pub const TRB_COMPLETION_CODE_SHIFT:u32=24;
+pub const TRB_CYCLE:u32=1;
+pub const TRB_CHAIN:u32=1<<4;
+pub const TRB_IOC:u32=1<<5;
+pub const TRB_IDT:u32=1<<6;
+pub const TRB_DIR_IN:u32=1<<16;
+pub const SETUP_TRANSFER_NO_DATA:u32=0<<16;
+pub const SETUP_TRANSFER_OUT:u32=2<<16;
+pub const SETUP_TRANSFER_IN:u32=3<<16;
 
 pub const USBCMD_RUN_STOP:u32=1<<0;
 pub const USBCMD_HCRST:u32=1<<1;
@@ -364,4 +372,68 @@ pub fn setup_stage_trb(setup:UsbSetupPacket,transfer_type:u32)->Trb {
   |((setup.index as u64)<<32)
   |((setup.length as u64)<<48);
  Trb{parameter:packed,status:0,control:TRB_TYPE_SETUP_STAGE|transfer_type}
+}
+
+
+/// xHCI context builder.  The memory is deliberately allocated from the
+/// existing DMA-limited allocator so the controller never receives a host
+/// virtual address as a hardware pointer.
+pub fn allocate_dma_page()->Result<u64,&'static str> {
+ crate::memory::allocate_frame_below(XHCI_DMA_LIMIT).ok_or("xHCI DMA page allocation failed")
+}
+
+pub fn prepare_address_device_context(
+ controller:&XhciController,
+ slot:u8,
+ port:u8,
+ speed:u8,
+)->Result<(u64,u64),&'static str> {
+ if slot==0 || slot as usize>=XHCI_MAX_SLOTS { return Err("invalid xHCI slot"); }
+ if port==0 || port as usize>controller.ports as usize { return Err("invalid xHCI root port"); }
+ let input=allocate_dma_page()?;
+ let device=allocate_dma_page()?;
+ unsafe {
+  core::ptr::write_bytes(input as *mut u8,0,XHCI_PAGE_SIZE as usize);
+  core::ptr::write_bytes(device as *mut u8,0,XHCI_PAGE_SIZE as usize);
+  // Input Control Context: A0 selects Slot Context, A1 selects EP0.
+  core::ptr::write_volatile((input as *mut u32).add(1),0x3);
+  let ctx=controller.capability.context_size() as usize;
+  let slot_ctx=(input as usize + 32) as *mut u32;
+  let ep0_ctx=(input as usize + 32 + ctx) as *mut u32;
+  // Slot Context DW0: route string 0, speed, context entries = EP0.
+  core::ptr::write_volatile(slot_ctx,((speed as u32)&0xF)<<20 | 1<<27);
+  // Slot Context DW1: root hub port number.
+  core::ptr::write_volatile(slot_ctx.add(1),(port as u32)<<16);
+  // EP0 Context DW1: endpoint type/control transfer + max packet size.
+  // The initial packet size is selected conservatively by USB speed.
+  let max_packet=match speed { 1=>8, 2=>64, 3=>64, 4=>512, _=>8 } as u32;
+  core::ptr::write_volatile(ep0_ctx.add(1),3<<3 | max_packet<<16);
+  // Device Context Base Address Array entry for this slot.
+  core::ptr::write_volatile((controller.dcbaa_phys as *mut u64).add(slot as usize),device);
+ }
+ Ok((input,device))
+}
+
+pub fn data_stage_trb(buffer:u64,length:u32,in_direction:bool,chain:bool)->Trb {
+ let mut control=TRB_TYPE_DATA_STAGE | if in_direction { TRB_DIR_IN } else { 0 } | TRB_IOC;
+ if chain { control|=TRB_CHAIN; }
+ Trb{parameter:buffer,status:length & 0x1ffff,control}
+}
+
+pub fn status_stage_trb(in_direction:bool)->Trb {
+ Trb{parameter:0,status:0,control:TRB_TYPE_STATUS_STAGE | if in_direction { TRB_DIR_IN } else { 0 } | TRB_IOC}
+}
+
+pub fn control_transfer_trbs(
+ setup:UsbSetupPacket,
+ data_buffer:u64,
+ data_length:u16,
+)->(Trb,Option<Trb>,Trb) {
+ let transfer_type=if data_length==0 { SETUP_TRANSFER_NO_DATA }
+  else if setup.request_type & 0x80 != 0 { SETUP_TRANSFER_IN }
+  else { SETUP_TRANSFER_OUT };
+ let setup_trb=setup_stage_trb(setup,transfer_type | TRB_IDT);
+ if data_length==0 { return (setup_trb,None,status_stage_trb(true)); }
+ let data_in=setup.request_type & 0x80 != 0;
+ (setup_trb,Some(data_stage_trb(data_buffer,data_length as u32,data_in,false)),status_stage_trb(!data_in))
 }
