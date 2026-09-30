@@ -359,6 +359,35 @@ pub fn grant(cell: CellId, object: ObjectId, rights: CapabilityRights) -> Result
     state.cells[index].grant(object, rights)
 }
 
+pub fn device_submit(
+    cell: CellId,
+    capability: CapabilityId,
+    object: ObjectId,
+    opcode: u32,
+    flags: u32,
+    argument: u64,
+    value: u64,
+    buffer: u64,
+    token: u64,
+) -> Result<(), &'static str> {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
+        return Err("cell does not exist");
+    }
+    if !state.cells[index].permits(capability, object, CapabilityRights::DEVICE.union(CapabilityRights::WRITE)) {
+        return Err("device capability denied");
+    }
+    if !object_exists_unlocked(state, object) || state.objects[object.index()].kind != ObjectKind::Device {
+        return Err("object is not a device");
+    }
+    drop(guard);
+    super::io_fabric::submit_device(super::DeviceRequest {
+        device: object, opcode, flags, argument, value, buffer, token,
+    })
+}
+
 pub fn revoke(cell: CellId, capability: CapabilityId) -> Result<(), &'static str> {
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
