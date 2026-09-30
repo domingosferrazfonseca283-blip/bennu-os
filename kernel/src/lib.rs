@@ -6,6 +6,11 @@ pub mod boot_info;
 pub mod memory;
 pub mod model;
 
+
+extern "C" fn bootstrap_cell() -> model::CellAction {
+    model::CellAction::Stop
+}
+
 pub fn init(boot_info: *const boot_info::BootInfo) {
     arch::init();
     model::runtime::init();
@@ -29,6 +34,14 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         let _ = model::graph::link(root, device, model::RelationKind::Contains);
         let _ = model::runtime::grant(model::CellId(1), device, model::CapabilityRights::OBSERVE);
         arch::diagnostics::write_line(1, b"BENNU MODEL: ROOT CAPABILITY ONLINE");
+
+    if model::runtime::bind_entry(model::CellId(1), bootstrap_cell).is_ok() {
+        match model::runtime::run_once(model::CellId(1)) {
+            Ok(model::CellAction::Stop) => arch::diagnostics::write_line(1, b"BENNU EXEC: CELL COMPLETED"),
+            Ok(_) => arch::diagnostics::write_line(1, b"BENNU EXEC: CELL YIELDED"),
+            Err(_) => arch::diagnostics::write_line(1, b"BENNU EXEC: CELL FAILED"),
+        }
+    }
     }
 
     if boot_info.is_null() {
