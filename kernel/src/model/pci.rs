@@ -105,3 +105,33 @@ pub fn first_mmio_bar(device:&PciDevice) -> Option<u64> {
     }
     None
 }
+
+
+pub fn find_xhci_legacy(bus_limit:u8, device_limit:u8, function_limit:u8) -> Option<PciDevice> {
+    for bus in 0..bus_limit {
+        for device in 0..device_limit {
+            let header=PciAddress{segment:0,bus,device,function:0};
+            let vendor=unsafe{read16(header,0)};
+            if vendor==0xffff { continue; }
+            let header_type=(unsafe{read32(header,0x0c)}>>16) as u8;
+            let functions=if header_type&0x80!=0 {function_limit} else {1};
+            for function in 0..functions {
+                let address=PciAddress{segment:0,bus,device,function};
+                let id=unsafe{read32(address,0)};
+                if id as u16==0xffff {continue;}
+                let class_reg=unsafe{read32(address,0x08)};
+                let class=(class_reg>>24) as u8;
+                let subclass=(class_reg>>16) as u8;
+                let prog_if=(class_reg>>8) as u8;
+                if (class,subclass,prog_if)!=xhci_class(){continue;}
+                let mut bars=[0u64;6];
+                for index in 0..6 {
+                    bars[index]=unsafe{read32(address,0x10+(index as u8)*4) as u64};
+                }
+                let object=super::runtime::create_object(super::ObjectKind::Device,0).ok()?;
+                return Some(PciDevice{object,address,vendor:id as u16,device_id:(id>>16) as u16,class,subclass,prog_if,bars});
+            }
+        }
+    }
+    None
+}
