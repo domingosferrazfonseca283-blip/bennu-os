@@ -16,16 +16,18 @@ const HEAP_PAGES: usize = (HEAP_SIZE / PAGE_SIZE) as usize;
 pub struct BennuHeap {
     next: usize,
     limit: usize,
+    mapped_end: usize,
 }
 
 impl BennuHeap {
     pub const fn new() -> Self {
-        Self { next: 0, limit: 0 }
+        Self { next: 0, limit: 0, mapped_end: 0 }
     }
 
     pub unsafe fn init(&mut self) {
         self.next = HEAP_BASE as usize;
         self.limit = self.next + HEAP_SIZE as usize;
+        self.mapped_end = self.next;
     }
 
     unsafe fn allocate(&mut self, layout: Layout) -> *mut u8 {
@@ -45,17 +47,23 @@ impl BennuHeap {
             return null_mut();
         }
 
-        let first_page = aligned & !(PAGE_SIZE as usize - 1);
         let last_page = (end - 1) & !(PAGE_SIZE as usize - 1);
+        let mut page = self.mapped_end;
 
-        let mut page = first_page;
         while page <= last_page {
-            if map_page(page as u64, allocate_frame().unwrap_or(0)).is_err() {
+            let frame = match allocate_frame() {
+                Some(frame) => frame,
+                None => return null_mut(),
+            };
+
+            if map_page(page as u64, frame).is_err() {
                 return null_mut();
             }
+
             page += PAGE_SIZE as usize;
         }
 
+        self.mapped_end = last_page + PAGE_SIZE as usize;
         self.next = end;
         aligned as *mut u8
     }
