@@ -27,6 +27,7 @@ pub struct Call {
     pub object: ObjectId,
     pub argument: u64,
     pub value: u64,
+    pub length: u64,
 }
 
 impl Call {
@@ -37,6 +38,7 @@ impl Call {
         object: ObjectId::NULL,
         argument: 0,
         value: 0,
+        length: 0,
     };
 }
 
@@ -141,7 +143,7 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
             let token = call.value;
             match super::runtime::device_submit(
                 cell, call.capability, call.object, opcode, flags,
-                call.argument, 0, 0, token,
+                0, 0, call.argument, call.length, token,
             ) {
                 Ok(()) => ResultCode::OK,
                 Err(_) => ResultCode::error(ABI_STATUS_DENIED),
