@@ -245,3 +245,18 @@ A implementação atual limita opcode e flags ao formato compacto da ABI; a exec
 O Device Fabric deixou de ser uma estrutura temporária do arranque. O runtime mantém uma instância persistente e o scheduler pode consumir a fila DeviceRequest através de service_device_io().
 
 O primeiro executor concreto é xHCI: requests dirigidos ao Object do controlador podem produzir comandos nativos como Enable Slot. O evento emitido neste estágio é DeviceQueued, não DeviceCompleted; a conclusão só será declarada depois de o Event Ring/DMA físico confirmar o comando. Assim a arquitetura não confunde aceitação do request com conclusão de hardware.
+
+
+### Command Ring → Event Ring → Completion
+
+O primeiro caminho físico assíncrono do Device Fabric agora atravessa o hardware xHCI de ponta a ponta no modelo do kernel:
+
+`DeviceRequest → DeviceFabric → Command Ring DMA → xHCI → Event Ring DMA → DeviceCompleted`
+
+O Command Ring reserva explicitamente o TRB de Link, grava o TRB lógico na memória DMA física e toca o doorbell do controlador. O runtime mantém o token associado ao endereço físico do command TRB.
+
+O Event Ring possui dequeue e cycle state próprios. O runtime lê os TRBs DMA produzidos pelo controlador, atualiza o Event Ring Dequeue Pointer e, para Command Completion Events, correlaciona o command TRB com o request pendente. A conclusão é então publicada como `DeviceCompleted` no Event Fabric.
+
+O valor do evento preserva o token e o completion code xHCI. `DeviceQueued` continua significando apenas que o request foi aceito pelo Device Fabric; `DeviceCompleted` significa confirmação observável pelo Event Ring.
+
+Este caminho ainda é código de bring-up de hardware e não é declarado como validado em QEMU ou em hardware físico até existir uma execução de CI/boot que o confirme.
