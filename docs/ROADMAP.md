@@ -26,13 +26,13 @@
 - [ ] memória virtual completa
 - [ ] proteção e sincronização do estado global
 - [x] execução cooperativa mínima de Cells
-- [ ] contexto de CPU por Cell
+- [x] contexto de CPU por Cell
 - [ ] preempção orientada a eventos
 - [ ] afinidade e recursos por Cell
 
 ## Fase 1.5 — Hardware e Resource Graph
-- [ ] controlador de interrupções
-- [ ] temporizador de hardware
+- [x] controlador de interrupções PIC inicial
+- [x] temporizador de hardware PIT inicial
 - [ ] descoberta de dispositivos como Objects
 - [ ] Resource Graph persistente em memória
 - [ ] modelo de drivers baseado em Cells
