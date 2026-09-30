@@ -18,7 +18,7 @@ const BOOTSTRAP_LIMIT: u64 = 64 * 1024 * 1024;
 const IDENTITY_LIMIT: u64 = 64 * 1024 * 1024;
 
 #[no_mangle]
-pub static mut BENNU_KERNEL_ROOT: u64 = 0;
+pub static mut bennu_kernel_root: u64 = 0;
 
 #[repr(C, align(4096))]
 struct PageTable {
@@ -75,7 +75,7 @@ pub fn init() -> Result<(), &'static str> {
         }
 
         load_cr3(pml4_frame);
-        BENNU_KERNEL_ROOT = pml4_frame;
+        bennu_kernel_root = pml4_frame;
     }
 
     Ok(())
@@ -88,7 +88,7 @@ pub fn init() -> Result<(), &'static str> {
 /// being brought up.
 pub fn current_root() -> u64 { unsafe { read_cr3() } }
 
-pub fn kernel_root() -> u64 { unsafe { BENNU_KERNEL_ROOT } }
+pub fn kernel_root() -> u64 { unsafe { bennu_kernel_root } }
 
 pub fn create_address_space_root() -> Result<u64, &'static str> {
     let root = allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space root")?;
