@@ -11,6 +11,7 @@ pub const HEAP_SIZE: u64 = 8 * 1024 * 1024;
 const PAGE_TABLE_ENTRIES: usize = 512;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
+const USER: u64 = 1 << 2;
 const HUGE_PAGE: u64 = 1 << 7;
 const BOOTSTRAP_LIMIT: u64 = 64 * 1024 * 1024;
 const IDENTITY_LIMIT: u64 = 64 * 1024 * 1024;
@@ -100,36 +101,85 @@ pub unsafe fn switch_address_space(root:u64) -> Result<(), &'static str> {
     Ok(())
 }
 
-pub fn map_page_in_root(root:u64, virtual_address:u64, physical_frame:u64) -> Result<(), &'static str> {
-    if root==0 || root & (PAGE_SIZE-1)!=0 { return Err("invalid address-space root"); }
-    if virtual_address & (PAGE_SIZE-1)!=0 || physical_frame & (PAGE_SIZE-1)!=0 { return Err("unaligned page mapping"); }
-    let pml4_index=((virtual_address>>39)&0x1ff) as usize;
-    let pdpt_index=((virtual_address>>30)&0x1ff) as usize;
-    let pd_index=((virtual_address>>21)&0x1ff) as usize;
-    let pt_index=((virtual_address>>12)&0x1ff) as usize;
+pub fn map_page_in_root(root: u64, virtual_address: u64, physical_frame: u64) -> Result<(), &'static str> {
+    map_page_in_root_with_flags(root, virtual_address, physical_frame, false, true)
+}
+
+pub fn map_user_page_in_root(
+    root: u64,
+    virtual_address: u64,
+    physical_frame: u64,
+    writable: bool,
+) -> Result<(), &'static str> {
+    map_page_in_root_with_flags(root, virtual_address, physical_frame, true, writable)
+}
+
+fn map_page_in_root_with_flags(
+    root: u64,
+    virtual_address: u64,
+    physical_frame: u64,
+    user: bool,
+    writable: bool,
+) -> Result<(), &'static str> {
+    if root == 0 || root & (PAGE_SIZE - 1) != 0 {
+        return Err("invalid address-space root");
+    }
+    if virtual_address & (PAGE_SIZE - 1) != 0 || physical_frame & (PAGE_SIZE - 1) != 0 {
+        return Err("unaligned page mapping");
+    }
+
+    let pml4_index = ((virtual_address >> 39) & 0x1ff) as usize;
+    let pdpt_index = ((virtual_address >> 30) & 0x1ff) as usize;
+    let pd_index = ((virtual_address >> 21) & 0x1ff) as usize;
+    let pt_index = ((virtual_address >> 12) & 0x1ff) as usize;
+    let intermediate = PRESENT | WRITABLE | if user { USER } else { 0 };
+    let leaf = PRESENT | if writable { WRITABLE } else { 0 } | if user { USER } else { 0 };
+
     unsafe {
-        let pml4=table_at(root);
-        let pdpt_frame=pml4.entries[pml4_index]&0x000f_ffff_ffff_f000;
-        let pdpt_frame=if pdpt_frame==0 {
-            let f=allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space PDPT")?;
-            zero_table(f); pml4.entries[pml4_index]=f|PRESENT|WRITABLE; f
-        } else { pdpt_frame };
-        let pdpt=table_at(pdpt_frame);
-        if pdpt.entries[pdpt_index]&HUGE_PAGE!=0 { return Err("address-space mapping hits huge page"); }
-        let pd_frame=pdpt.entries[pdpt_index]&0x000f_ffff_ffff_f000;
-        let pd_frame=if pd_frame==0 {
-            let f=allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space PD")?;
-            zero_table(f); pdpt.entries[pdpt_index]=f|PRESENT|WRITABLE; f
-        } else { pd_frame };
-        let pd=table_at(pd_frame);
-        if pd.entries[pd_index]&HUGE_PAGE!=0 { return Err("address-space mapping hits huge page"); }
-        let pt_frame=pd.entries[pd_index]&0x000f_ffff_ffff_f000;
-        let pt_frame=if pt_frame==0 {
-            let f=allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space PT")?;
-            zero_table(f); pd.entries[pd_index]=f|PRESENT|WRITABLE; f
-        } else { pt_frame };
-        let pt=table_at(pt_frame);
-        pt.entries[pt_index]=physical_frame|PRESENT|WRITABLE;
+        let pml4 = table_at(root);
+        let pdpt_frame = pml4.entries[pml4_index] & 0x000f_ffff_ffff_f000;
+        let pdpt_frame = if pdpt_frame == 0 {
+            let f = allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space PDPT")?;
+            zero_table(f);
+            pml4.entries[pml4_index] = f | intermediate;
+            f
+        } else {
+            if user { pml4.entries[pml4_index] |= USER; }
+            pdpt_frame
+        };
+
+        let pdpt = table_at(pdpt_frame);
+        if pdpt.entries[pdpt_index] & HUGE_PAGE != 0 {
+            return Err("address-space mapping hits huge page");
+        }
+        let pd_frame = pdpt.entries[pdpt_index] & 0x000f_ffff_ffff_f000;
+        let pd_frame = if pd_frame == 0 {
+            let f = allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space PD")?;
+            zero_table(f);
+            pdpt.entries[pdpt_index] = f | intermediate;
+            f
+        } else {
+            if user { pdpt.entries[pdpt_index] |= USER; }
+            pd_frame
+        };
+
+        let pd = table_at(pd_frame);
+        if pd.entries[pd_index] & HUGE_PAGE != 0 {
+            return Err("address-space mapping hits huge page");
+        }
+        let pt_frame = pd.entries[pd_index] & 0x000f_ffff_ffff_f000;
+        let pt_frame = if pt_frame == 0 {
+            let f = allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space PT")?;
+            zero_table(f);
+            pd.entries[pd_index] = f | intermediate;
+            f
+        } else {
+            if user { pd.entries[pd_index] |= USER; }
+            pt_frame
+        };
+
+        let pt = table_at(pt_frame);
+        pt.entries[pt_index] = physical_frame | leaf;
     }
     Ok(())
 }
