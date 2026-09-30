@@ -65,6 +65,9 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
         Operation::Yield => ResultCode::error(ABI_STATUS_YIELD),
         Operation::None => ResultCode::error(ABI_STATUS_INVALID),
         Operation::ObjectQuery => {
+            if !super::runtime::permits(cell, call.capability, call.object, super::CapabilityRights::READ) {
+                return ResultCode::error(ABI_STATUS_DENIED);
+            }
             if super::runtime::object_exists(call.object) {
                 ResultCode::OK
             } else {
