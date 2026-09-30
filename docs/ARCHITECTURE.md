@@ -238,3 +238,10 @@ A fronteira Ring 3 não entrega uma estrutura de kernel diretamente. A chamada n
 O request interno conserva buffer, comprimento, argumento, valor e token como dados do kernel. A fila não recebe ponteiros físicos nem autoridade adicional. Assim, uma Cell só consegue submeter I/O para um Device Object que já possui através de Capability e dentro de um intervalo virtual que o kernel aceitou.
 
 A implementação atual limita opcode e flags ao formato compacto da ABI; a execução física ainda pertence ao Device Fabric/driver e a conclusão será entregue pelo Event Fabric.
+
+
+### Device Fabric persistente
+
+O Device Fabric deixou de ser uma estrutura temporária do arranque. O runtime mantém uma instância persistente e o scheduler pode consumir a fila DeviceRequest através de service_device_io().
+
+O primeiro executor concreto é xHCI: requests dirigidos ao Object do controlador podem produzir comandos nativos como Enable Slot. O evento emitido neste estágio é DeviceQueued, não DeviceCompleted; a conclusão só será declarada depois de o Event Ring/DMA físico confirmar o comando. Assim a arquitetura não confunde aceitação do request com conclusão de hardware.
