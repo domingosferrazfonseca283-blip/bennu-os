@@ -4,6 +4,7 @@
 pub mod arch;
 pub mod boot_info;
 pub mod memory;
+pub mod model;
 
 pub fn init(boot_info: *const boot_info::BootInfo) {
     arch::init();
