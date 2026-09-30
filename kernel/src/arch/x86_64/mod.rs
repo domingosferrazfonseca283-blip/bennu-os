@@ -5,6 +5,7 @@ pub mod idt;
 pub mod pit;
 pub mod pic;
 pub mod io;
+pub mod syscall;
 
 pub fn init() {
     gdt::init();
