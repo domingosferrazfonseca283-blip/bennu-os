@@ -9,6 +9,7 @@ use crate::boot_info::{BootInfo, E820Entry, BENNU_E820_USABLE};
 
 pub mod heap;
 pub mod paging;
+pub mod user;
 
 pub const PAGE_SIZE: u64 = 4096;
 
