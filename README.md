@@ -77,3 +77,12 @@ Bennu não deve acessar ou modificar automaticamente discos internos. Armazename
 A documentação de arquitetura, boot, armazenamento e execução em USB está em `docs/`.
 
 A construção usa uma toolchain freestanding própria. O projeto pode usar ferramentas externas durante o desenvolvimento, mas o sistema operacional mantém suas próprias abstrações no runtime e no kernel.
+
+
+### Latest kernel progress
+
+- Native asynchronous block I/O fabric with USB-first access policy
+- EventPort filtering and subscriptions
+- Capability generations and revocation
+- Legacy PCI configuration-space discovery
+- PCI discovery emits native DeviceAttached events
