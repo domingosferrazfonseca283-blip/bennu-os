@@ -26,9 +26,9 @@
 - [x] runtime inicial de Objects/Cells/Capabilities
 - [x] sincronização base do runtime
 - [x] scheduler cooperativo inicial
-- [ ] contexto de CPU completo com troca real de contexto
-- [ ] memória virtual completa
-- [ ] espaços de memória independentes por Cell
+- [x] contexto de CPU com troca real de contexto entre stacks de Cell
+- [ ] memória virtual completa (isolamento de utilizador, permissões e reclamação)
+- [x] raízes de espaço de memória independentes por Cell
 - [ ] preempção orientada a eventos
 - [ ] afinidade e quotas de recursos por Cell
 - [ ] IPC nativo orientado a Events
