@@ -6,6 +6,10 @@ pub mod boot_info;
 pub mod memory;
 pub mod model;
 
+fn arch_user_install(root: u64) -> Result<(), &'static str> {
+    arch::x86_64::userspace::install(model::CellId(2), root)
+}
+
 extern "C" fn bootstrap_cell() -> model::CellAction {
     model::CellAction::Stop
 }
@@ -61,6 +65,34 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
 
     unsafe { memory::heap::init(); }
     arch::diagnostics::write_line(6, b"BENNU MEMORY: KERNEL HEAP ONLINE");
+
+    let user_root_object = match model::runtime::create_object(model::ObjectKind::Cell, 0) {
+        Ok(object) => object,
+        Err(_) => {
+            arch::diagnostics::write_line(1, b"BENNU USER: ROOT OBJECT FAILED");
+            return;
+        }
+    };
+    if model::runtime::create_cell(model::CellId(2), user_root_object).is_err() {
+        arch::diagnostics::write_line(1, b"BENNU USER: CELL CREATE FAILED");
+        return;
+    }
+    if model::runtime::prepare_cell_context(
+        model::CellId(2),
+        model::scheduler::cell_trampoline as usize as u64,
+    ).is_err() {
+        arch::diagnostics::write_line(1, b"BENNU USER: CELL CONTEXT FAILED");
+        return;
+    }
+    let user_root = match model::runtime::context_ptr(model::CellId(2)) {
+        Some(_) => model::runtime::cell_address_space_root(model::CellId(2)).unwrap_or(0),
+        None => 0,
+    };
+    if user_root == 0 || model::arch_user_install(user_root).is_err() {
+        arch::diagnostics::write_line(1, b"BENNU USER: ADDRESS SPACE INSTALL FAILED");
+        return;
+    }
+    arch::diagnostics::write_line(6, b"BENNU USER: RING3 CELL ONLINE");
 
     if model::runtime::bind_entry(model::CellId(1), bootstrap_cell).is_err() {
         arch::diagnostics::write_line(1, b"BENNU EXEC: CELL ENTRY BIND FAILED");
