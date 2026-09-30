@@ -98,7 +98,7 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
         }
 
         Operation::CapabilityGrant => {
-            if !super::runtime::permits(cell, call.capability, call.object, R::SHARE.union(R::ADMIN)) {
+            if !super::runtime::permits_any(cell, call.capability, call.object, &[R::SHARE, R::ADMIN]) {
                 return ResultCode::error(ABI_STATUS_DENIED);
             }
             let target = super::CellId(call.argument as u32);
@@ -113,7 +113,7 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
             if !super::runtime::permits(cell, call.capability, call.object, R::OBSERVE) {
                 return ResultCode::error(ABI_STATUS_DENIED);
             }
-            match super::runtime::poll() {
+            match super::runtime::poll_for_object(call.object) {
                 Some(event) => ResultCode { status: ABI_STATUS_OK, value: event.value },
                 None => ResultCode::error(ABI_STATUS_NOT_FOUND),
             }
