@@ -17,7 +17,7 @@ impl EventFilter {
         target: ObjectId::NULL,
     };
 
-    pub const fn matches(&self, event: Event) -> bool {
+    pub fn matches(&self, event: Event) -> bool {
         (self.kind == EventKind::None || self.kind == event.kind)
             && (self.source.is_null() || self.source == event.source)
             && (self.target.is_null() || self.target == event.target)
