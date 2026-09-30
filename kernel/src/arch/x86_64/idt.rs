@@ -24,12 +24,10 @@ impl IdtEntry {
         reserved: 0,
     };
 
-    fn set_handler(&mut self, handler: Handler) {
-        let address = handler as usize as u64;
-
+    fn set_address(&mut self, address: u64) {
         self.offset_low = address as u16;
         self.selector = super::gdt::KERNEL_CODE_SELECTOR;
-        self.options = 0x8E00; // present, DPL0, interrupt gate
+        self.options = 0x8E00;
         self.offset_mid = (address >> 16) as u16;
         self.offset_high = (address >> 32) as u32;
         self.reserved = 0;
@@ -43,8 +41,10 @@ struct Idtr {
 }
 
 type Handler = extern "x86-interrupt" fn(InterruptStackFrame);
+type HandlerWithError = extern "x86-interrupt" fn(InterruptStackFrame, u64);
+type DivergingHandlerWithError =
+    extern "x86-interrupt" fn(InterruptStackFrame, u64) -> !;
 
-/// The subset of the CPU-pushed frame Bennu needs during the first exception stage.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InterruptStackFrame {
@@ -68,14 +68,20 @@ extern "x86-interrupt" fn breakpoint_handler(frame: InterruptStackFrame) {
     super::diagnostics::write_line(1, b"BENNU BREAKPOINT");
 }
 
-extern "x86-interrupt" fn double_fault_handler(frame: InterruptStackFrame, error_code: u64) -> ! {
+extern "x86-interrupt" fn double_fault_handler(
+    frame: InterruptStackFrame,
+    error_code: u64,
+) -> ! {
     let _ = frame;
     let _ = error_code;
     super::diagnostics::write_line(1, b"BENNU DOUBLE FAULT");
     halt_forever()
 }
 
-extern "x86-interrupt" fn page_fault_handler(frame: InterruptStackFrame, error_code: u64) {
+extern "x86-interrupt" fn page_fault_handler(
+    frame: InterruptStackFrame,
+    error_code: u64,
+) {
     let _ = frame;
     let _ = error_code;
     super::diagnostics::write_line(1, b"BENNU PAGE FAULT");
@@ -96,10 +102,12 @@ pub fn init() {
             *entry = IdtEntry::EMPTY;
         }
 
-        IDT[0].set_handler(exception_handler);
-        IDT[3].set_handler(breakpoint_handler);
-        IDT[8].set_handler(double_fault_handler as Handler);
-        IDT[14].set_handler(page_fault_handler as Handler);
+        IDT[0].set_address(exception_handler as usize as u64);
+        IDT[3].set_address(breakpoint_handler as usize as u64);
+        IDT[8].set_address(
+            double_fault_handler as DivergingHandlerWithError as usize as u64,
+        );
+        IDT[14].set_address(page_fault_handler as HandlerWithError as usize as u64);
 
         let idtr = Idtr {
             limit: (size_of::<[IdtEntry; 256]>() - 1) as u16,
