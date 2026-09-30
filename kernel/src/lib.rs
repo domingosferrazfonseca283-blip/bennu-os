@@ -22,4 +22,12 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     }
 
     arch::diagnostics::write_line(4, b"BENNU MEMORY: E820 + FRAME ALLOCATOR ONLINE");
+
+    if let Err(message) = memory::paging::init() {
+        let _ = message;
+        arch::diagnostics::write_line(5, b"BENNU MEMORY: PAGING INITIALIZATION FAILED");
+        return;
+    }
+
+    arch::diagnostics::write_line(5, b"BENNU MEMORY: KERNEL PAGING ONLINE");
 }
