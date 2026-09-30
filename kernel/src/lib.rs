@@ -30,4 +30,10 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     }
 
     arch::diagnostics::write_line(5, b"BENNU MEMORY: KERNEL PAGING ONLINE");
+
+    unsafe {
+        memory::heap::init();
+    }
+
+    arch::diagnostics::write_line(6, b"BENNU MEMORY: KERNEL HEAP ONLINE");
 }
