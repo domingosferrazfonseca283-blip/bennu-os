@@ -33,6 +33,7 @@ pub use surface::Surface;
 pub use address_space::{AddressSpace,AddressSpaceId,Mapping,MappingKind};
 pub use storage::{BlockDevice,BlockGeometry,BlockKind,BlockOp,BlockRequest};
 pub use usb::{HostControllerKind,TransferKind,UsbAddress,UsbDeviceDescriptor,UsbEndpoint};
+pub use device::{DeviceClass,DeviceDescriptor};
 pub use driver::{DriverBinding,DriverState};
 pub use io::{IoCompletion,IoEnvelope,IoState};
 pub use filesystem::{JournalOp,JournalRecord,Node,NodeKind,Superblock};
