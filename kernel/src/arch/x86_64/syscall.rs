@@ -129,11 +129,12 @@ extern "C" fn bennu_syscall_dispatch(frame: *mut RegisterFrame) -> u64 {
 
     let call = Call {
         operation,
-        flags: 0,
+        flags: if matches!(operation, Operation::DeviceSubmit) { regs.r11 as u16 } else { 0 },
         capability: CapabilityId(regs.rdi),
         object: ObjectId(regs.rsi),
         argument: regs.rdx,
-        value: regs.r10,
+        value: if matches!(operation, Operation::DeviceSubmit) { regs.r8 } else { regs.r10 },
+        length: if matches!(operation, Operation::DeviceSubmit) { regs.r10 } else { 0 },
     };
 
     let result: ResultCode = abi::dispatch(cell, &call);
