@@ -260,3 +260,24 @@ O Event Ring possui dequeue e cycle state próprios. O runtime lê os TRBs DMA p
 O valor do evento preserva o token e o completion code xHCI. `DeviceQueued` continua significando apenas que o request foi aceito pelo Device Fabric; `DeviceCompleted` significa confirmação observável pelo Event Ring.
 
 Este caminho ainda é código de bring-up de hardware e não é declarado como validado em QEMU ou em hardware físico até existir uma execução de CI/boot que o confirme.
+
+
+## Transferência USB nativa: primeiro caminho de Control Transfer
+
+A camada xHCI agora possui as primitivas físicas para sair do modelo apenas de comandos de controlador e preparar uma transferência USB real no endpoint 0.
+
+O caminho é:
+
+`Cell → Capability(Device) → Device Fabric → xHCI → Input Context → Address Device → EP0 Transfer Ring → Setup/Data/Status TRBs → Transfer Event → Event Fabric`
+
+A preparação de `Address Device` constrói um Input Context DMA e um Device Context DMA, seleciona o tamanho de contexto anunciado pelo controlador, cria o Slot Context com porta/velocidade e prepara o Endpoint 0 para control transfers.
+
+A primeira família de transferências nativas usa três estágios:
+
+- Setup Stage: pacote USB de 8 bytes inline no TRB, com Immediate Data;
+- Data Stage: opcional, com direção IN/OUT e buffer DMA;
+- Status Stage: direção complementar e IOC.
+
+A Transfer Ring é DMA-backed, termina com Link TRB e é acionada pelo doorbell do slot. O endereço físico do primeiro TRB é preservável para correlação posterior com um Transfer Event.
+
+Isto ainda não significa enumeração USB completa. O próximo passo é manter persistentemente os transfer rings por slot/endpoint, correlacionar `TRANSFER_EVENT` com requests pendentes e então executar `GET_DESCRIPTOR`, `SET_ADDRESS` e `SET_CONFIGURATION`. Só depois disso a camada Bulk-Only Mass Storage poderá transportar CBW/CSW e SCSI sobre os endpoints reais.
