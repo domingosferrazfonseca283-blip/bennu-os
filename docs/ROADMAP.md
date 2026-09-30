@@ -63,7 +63,9 @@
 - [x] topologia USB: interfaces/endpoints e identificação Bulk-Only Mass Storage
 - [x] USB Mass Storage: CBW/CSW e comandos SCSI base
 - [ ] ligação física completa entre TRBs DMA e dispositivos USB
-- [ ] consumo da fila DeviceRequest pelo Device Fabric/xHCI
+- [x] consumo da fila DeviceRequest pelo Device Fabric/xHCI
+- [x] Device Fabric persistente no runtime
+- [ ] confirmação de DeviceRequest pelo Event Ring xHCI
 - [ ] completions de DeviceRequest no Event Fabric
 - [ ] fila de requests de bloco assíncrona
 - [ ] BennuFS
