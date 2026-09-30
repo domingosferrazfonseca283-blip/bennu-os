@@ -50,3 +50,43 @@ impl ResultCode {
     pub const OK: Self = Self { status: 0, value: 0 };
     pub const fn error(code: u64) -> Self { Self { status: code, value: 0 } }
 }
+
+
+pub const ABI_STATUS_OK: u64 = 0;
+pub const ABI_STATUS_INVALID: u64 = 1;
+pub const ABI_STATUS_DENIED: u64 = 2;
+pub const ABI_STATUS_NOT_FOUND: u64 = 3;
+pub const ABI_STATUS_UNSUPPORTED: u64 = 4;
+
+pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
+    match call.operation {
+        Operation::None => ResultCode::error(ABI_STATUS_INVALID),
+        Operation::ObjectQuery => {
+            if super::runtime::object_exists(call.object) {
+                ResultCode::OK
+            } else {
+                ResultCode::error(ABI_STATUS_NOT_FOUND)
+            }
+        }
+        Operation::EventEmit => {
+            if !super::runtime::permits(
+                cell,
+                call.capability,
+                call.object,
+                super::CapabilityRights::OBSERVE,
+            ) {
+                return ResultCode::error(ABI_STATUS_DENIED);
+            }
+            match super::runtime::emit(super::Event::new(
+                super::EventKind::ResourceChanged,
+                call.object,
+                super::ObjectId::NULL,
+                call.argument,
+            )) {
+                Ok(()) => ResultCode::OK,
+                Err(_) => ResultCode::error(ABI_STATUS_INVALID),
+            }
+        }
+        _ => ResultCode::error(ABI_STATUS_UNSUPPORTED),
+    }
+}
