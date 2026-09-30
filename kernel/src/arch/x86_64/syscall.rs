@@ -20,7 +20,10 @@ bennu_syscall_entry:
     push r13
     push r14
     push r15
-    sub rsp, 8
+    mov r15, cr3
+    push r15
+    mov r15, [rip + bennu_kernel_root]
+    mov cr3, r15
 
     lea rdi, [rsp + 8]
     call bennu_syscall_dispatch
@@ -28,6 +31,8 @@ bennu_syscall_entry:
     jne 1f
     call bennu_syscall_yield
 1:
+    mov r15, [rsp]
+    mov cr3, r15
     add rsp, 8
     pop r15
     pop r14
@@ -133,4 +138,9 @@ extern "C" fn bennu_syscall_dispatch(frame: *mut RegisterFrame) -> u64 {
     regs.rax = result.status;
     regs.rdx = result.value;
     result.status
+}
+
+
+pub fn entry_address() -> u64 {
+    bennu_syscall_entry as usize as u64
 }
