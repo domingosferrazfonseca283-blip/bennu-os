@@ -1,3 +1,10 @@
+pub mod diagnostics;
+pub mod gdt;
+pub mod idt;
+
 pub fn init() {
-    // Próximas etapas: GDT, IDT, timer, paging e scheduler.
+    gdt::init();
+    idt::init();
+
+    diagnostics::write_line(0, b"BENNU KERNEL: GDT + IDT ONLINE");
 }
