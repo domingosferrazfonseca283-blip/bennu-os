@@ -18,6 +18,9 @@ pub mod pci;
 pub mod xhci;
 pub mod policy;
 pub mod clock;
+pub mod device_fabric;
+pub mod event_port;
+pub mod process;
 pub mod scheduler;
 pub mod runtime;
 
@@ -39,6 +42,9 @@ pub use pci::{PciAddress,PciDevice};
 pub use xhci::{CapabilityRegisters,OperationalRegisters,Trb,XhciController};
 pub use policy::{AccessPolicy,StoragePolicy};
 pub use clock::{TimeSpec,Timer};
+pub use device_fabric::{DeviceFabric,DeviceRecord};
+pub use event_port::EventPort;
+pub use process::Domain;
 
 pub const MAX_CELLS:usize=64;
 pub const MAX_OBJECTS:usize=256;
