@@ -5,8 +5,8 @@
 use core::panic::PanicInfo;
 
 #[no_mangle]
-pub extern "C" fn kmain() -> ! {
-    bennu_kernel::init();
+pub extern "C" fn kmain(boot_info: *const bennu_kernel::boot_info::BootInfo) -> ! {
+    bennu_kernel::init(boot_info);
 
     bennu_kernel::arch::diagnostics::write_line(
         2,
