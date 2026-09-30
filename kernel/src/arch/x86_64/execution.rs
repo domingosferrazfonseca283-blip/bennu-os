@@ -128,6 +128,9 @@ pub unsafe fn switch_to_cell(context: *mut Context, address_space_root: u64) -> 
     }
 
     CURRENT_CELL_CONTEXT = context;
+    let cell_id = crate::model::scheduler::current_cell().ok_or("no current Cell")?;
+    let kernel_stack = crate::model::runtime::kernel_stack_top(cell_id).ok_or("Cell kernel stack is missing")?;
+    crate::arch::x86_64::gdt::set_kernel_stack(kernel_stack)?;
     crate::memory::paging::switch_address_space(address_space_root)?;
     switch_stack(&mut SCHEDULER_CONTEXT, &*context);
     Ok(())
