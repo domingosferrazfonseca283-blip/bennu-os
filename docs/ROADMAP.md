@@ -9,23 +9,33 @@
 - [ ] Validação em QEMU
 - [ ] Toolchain totalmente reprodutível
 
-## Fase 1 — Kernel
+## Fase 1 — Kernel Core
 - [x] GDT própria do kernel
 - [x] IDT própria do kernel
 - [x] primeira camada de exceções CPU
-- [ ] interrupções externas (IRQ0)
-- [ ] PIC 8259A inicial
-- [ ] timer PIT a 100 Hz
-- [ ] APIC/IOAPIC
-- [ ] timer HPET/APIC
 - [x] protocolo Bennu BootInfo
 - [x] recolha inicial do mapa físico E820
 - [x] allocator inicial de frames físicos
-- [ ] paging gerido pelo kernel
-- [ ] heap do kernel
-- [ ] scheduler
-- [ ] processos e threads
-- [ ] IPC
+- [x] paging gerido pelo kernel
+- [x] heap inicial do kernel
+- [x] ObjectId e tipos nativos de Object
+- [x] Capability e direitos explícitos
+- [x] Cell e isolamento lógico inicial
+- [x] Event Fabric inicial sem alocação dinâmica
+- [x] runtime inicial de Objects/Cells/Capabilities
+- [ ] memória virtual completa
+- [ ] proteção e sincronização do estado global
+- [ ] execução real de Cells
+- [ ] preempção orientada a eventos
+- [ ] afinidade e recursos por Cell
+
+## Fase 1.5 — Hardware e Resource Graph
+- [ ] controlador de interrupções
+- [ ] temporizador de hardware
+- [ ] descoberta de dispositivos como Objects
+- [ ] Resource Graph persistente em memória
+- [ ] modelo de drivers baseado em Cells
+- [ ] acesso a dispositivos exclusivamente por Capability
 
 ## Fase 2 — Plataforma USB
 - [ ] identificação robusta do dispositivo de boot
