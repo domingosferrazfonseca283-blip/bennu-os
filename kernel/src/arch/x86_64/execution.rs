@@ -46,6 +46,7 @@ impl Context {
 }
 
 static mut SCHEDULER_CONTEXT: Context = Context::EMPTY;
+static mut SCHEDULER_ROOT: u64 = 0;
 static mut CURRENT_CELL_CONTEXT: *mut Context = ptr::null_mut();
 
 /// Prepare a fresh kernel stack for the Bennu Cell context-switch ABI.
@@ -114,11 +115,20 @@ pub unsafe fn switch_stack(old: &mut Context, new: &Context) {
 }
 
 /// Enter a Cell and return here when the Cell yields.
-pub unsafe fn switch_to_cell(context: *mut Context) -> Result<(), &'static str> {
+pub unsafe fn switch_to_cell(context: *mut Context, address_space_root: u64) -> Result<(), &'static str> {
     if context.is_null() || !(*context).is_initialized() {
         return Err("cell context is not initialized");
     }
+    if address_space_root == 0 || address_space_root & 0xfff != 0 {
+        return Err("cell address-space root is invalid");
+    }
+
+    if SCHEDULER_ROOT == 0 {
+        SCHEDULER_ROOT = crate::memory::paging::current_root();
+    }
+
     CURRENT_CELL_CONTEXT = context;
+    crate::memory::paging::switch_address_space(address_space_root)?;
     switch_stack(&mut SCHEDULER_CONTEXT, &*context);
     Ok(())
 }
@@ -128,6 +138,10 @@ pub unsafe fn switch_back_to_scheduler() -> Result<(), &'static str> {
     if CURRENT_CELL_CONTEXT.is_null() {
         return Err("no current cell context");
     }
+    if SCHEDULER_ROOT == 0 {
+        return Err("scheduler address-space root is not initialized");
+    }
+    crate::memory::paging::switch_address_space(SCHEDULER_ROOT)?;
     switch_stack(&mut *CURRENT_CELL_CONTEXT, &SCHEDULER_CONTEXT);
     Ok(())
 }
