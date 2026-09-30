@@ -41,7 +41,8 @@
 - [x] modelo inicial de dispositivos como Objects
 - [x] modelo inicial de USB
 - [x] modelo inicial de armazenamento em blocos
-- [ ] descoberta real de dispositivos PCI/USB
+- [x] descoberta PCI legada e identificação de xHCI
+- [x] descoberta real de portas xHCI e primitivas de reset/acknowledge
 - [ ] modelo de drivers baseado em Cells
 - [ ] acesso a dispositivos exclusivamente por Capability
 - [ ] APIC/IOAPIC
@@ -49,9 +50,11 @@
 
 ## Fase 2 — Plataforma USB
 - [ ] identificação robusta do dispositivo de boot
-- [ ] controlador xHCI
-- [ ] enumeração USB
-- [ ] USB Mass Storage
+- [x] controlador xHCI: MMIO, reset, DMA, rings, doorbell e interrupções
+- [x] enumeração USB: eventos, Enable Slot, Address Device e control-transfer primitives
+- [x] topologia USB: interfaces/endpoints e identificação Bulk-Only Mass Storage
+- [x] USB Mass Storage: CBW/CSW e comandos SCSI base
+- [ ] ligação física completa entre TRBs DMA e dispositivos USB
 - [ ] fila de requests de bloco assíncrona
 - [ ] BennuFS
 - [ ] journaling/recuperação
