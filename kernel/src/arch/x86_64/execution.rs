@@ -1,3 +1,24 @@
+core::arch::global_asm!(r#"
+.global bennu_context_switch
+.type bennu_context_switch,@function
+bennu_context_switch:
+    push rbp
+    push rbx
+    push r12
+    push r13
+    push r14
+    push r15
+    mov [rdi], rsp
+    mov rsp, [rsi]
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbx
+    pop rbp
+    ret
+"#);
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Context {
@@ -13,6 +34,9 @@ impl Context {
     }
     pub const fn is_initialized(&self) -> bool {
         self.stack_pointer != 0 && self.instruction_pointer != 0
+    }
+    pub const fn with_stack(stack_pointer:u64,instruction_pointer:u64)->Self {
+        Self{stack_pointer,instruction_pointer,flags:0x202}
     }
 }
 
@@ -40,4 +64,16 @@ pub fn capture_current() -> Context {
 #[inline]
 pub fn interrupts_enabled() -> bool {
     capture_current().flags & (1 << 9) != 0
+}
+
+
+extern "C" {
+    fn bennu_context_switch(old_stack:*mut u64,new_stack:*const u64);
+}
+
+/// Switches the kernel execution stack between two prepared Cell contexts.
+/// The first implementation preserves the SysV callee-saved register set.
+#[inline]
+pub unsafe fn switch_stack(old:&mut Context,new:&Context) {
+    bennu_context_switch(&mut old.stack_pointer,&new.stack_pointer);
 }
