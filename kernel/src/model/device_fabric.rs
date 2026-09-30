@@ -66,14 +66,15 @@ impl DeviceFabric {
      if self.controllers[c].object != request.device { continue; }
      return match request.opcode {
       1 => {
+       let pending_slot=match (0..MAX_PENDING_COMMANDS).find(|p| !self.pending[*p].valid) {
+        Some(p)=>p,
+        None=>return Err("device command tracking full"),
+       };
        let command_trb=super::xhci::enqueue_enable_slot(&mut self.controllers[c])?;
-       for p in 0..MAX_PENDING_COMMANDS {
-        if !self.pending[p].valid {
-         self.pending[p]=PendingCommand{valid:true,device:request.device,token:request.token,command_trb};
-         return Ok(());
-        }
-       }
-       Err("device command tracking full")
+       self.pending[pending_slot]=PendingCommand{
+        valid:true,device:request.device,token:request.token,command_trb
+       };
+       Ok(())
       },
       2 => Err("xHCI address-device requires input context"),
       _ => Err("unsupported xHCI device operation"),
