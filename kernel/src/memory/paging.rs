@@ -1,19 +1,18 @@
-//! Kernel-owned x86_64 paging bootstrap.
-//!
-//! Stage 2 supplies a temporary identity map so Rust can start. This module
-//! replaces that map with page tables owned by Bennu itself. The first policy
-//! maps the low 64 MiB with 2 MiB pages; later virtual-memory code will replace
-//! this bootstrap mapping with per-address-space page tables.
+//! Kernel-owned x86_64 paging and virtual-memory primitives.
 
 use core::arch::asm;
 
 use super::allocate_frame_below;
 
+pub const PAGE_SIZE: u64 = 4096;
+pub const HEAP_BASE: u64 = 64 * 1024 * 1024;
+pub const HEAP_SIZE: u64 = 8 * 1024 * 1024;
+
 const PAGE_TABLE_ENTRIES: usize = 512;
 const PRESENT: u64 = 1 << 0;
 const WRITABLE: u64 = 1 << 1;
 const HUGE_PAGE: u64 = 1 << 7;
-const BOOTSTRAP_LIMIT: u64 = 0x0020_0000;
+const BOOTSTRAP_LIMIT: u64 = 64 * 1024 * 1024;
 const IDENTITY_LIMIT: u64 = 64 * 1024 * 1024;
 
 #[repr(C, align(4096))]
@@ -30,12 +29,18 @@ unsafe fn zero_table(physical: u64) -> &'static mut PageTable {
     table_at(physical)
 }
 
+unsafe fn read_cr3() -> u64 {
+    let value: u64;
+    asm!("mov {value}, cr3", value = out(reg) value, options(nostack, preserves_flags));
+    value
+}
+
 unsafe fn load_cr3(physical: u64) {
-    asm!(
-        "mov cr3, {value}",
-        value = in(reg) physical,
-        options(nostack, preserves_flags),
-    );
+    asm!("mov cr3, {value}", value = in(reg) physical, options(nostack, preserves_flags));
+}
+
+unsafe fn invalidate_page(virtual_address: u64) {
+    asm!("invlpg [{address}]", address = in(reg) virtual_address, options(nostack, preserves_flags));
 }
 
 /// Build and activate the first page tables owned by Bennu.
@@ -65,6 +70,77 @@ pub fn init() -> Result<(), &'static str> {
         }
 
         load_cr3(pml4_frame);
+    }
+
+    Ok(())
+}
+
+/// Map one 4 KiB virtual page to a physical frame.
+///
+/// The page-table pages themselves are kept below 64 MiB so the bootstrap
+/// identity map can access them while the virtual-memory manager is still
+/// being brought up.
+pub fn map_page(virtual_address: u64, physical_frame: u64) -> Result<(), &'static str> {
+    if virtual_address & (PAGE_SIZE - 1) != 0
+        || physical_frame & (PAGE_SIZE - 1) != 0
+    {
+        return Err("unaligned page mapping");
+    }
+
+    let pml4_index = ((virtual_address >> 39) & 0x1ff) as usize;
+    let pdpt_index = ((virtual_address >> 30) & 0x1ff) as usize;
+    let pd_index = ((virtual_address >> 21) & 0x1ff) as usize;
+    let pt_index = ((virtual_address >> 12) & 0x1ff) as usize;
+
+    unsafe {
+        let pml4 = table_at(read_cr3());
+        let pdpt_frame = pml4.entries[pml4_index] & 0x000f_ffff_ffff_f000;
+
+        let pdpt_frame = if pdpt_frame == 0 {
+            let frame = allocate_frame_below(BOOTSTRAP_LIMIT)
+                .ok_or("cannot allocate PDPT")?;
+            zero_table(frame);
+            pml4.entries[pml4_index] = frame | PRESENT | WRITABLE;
+            frame
+        } else {
+            pdpt_frame
+        };
+
+        let pdpt = table_at(pdpt_frame);
+        let pd_frame = pdpt.entries[pdpt_index] & 0x000f_ffff_ffff_f000;
+
+        let pd_frame = if pd_frame == 0 {
+            let frame = allocate_frame_below(BOOTSTRAP_LIMIT)
+                .ok_or("cannot allocate page directory")?;
+            zero_table(frame);
+            pdpt.entries[pdpt_index] = frame | PRESENT | WRITABLE;
+            frame
+        } else {
+            if pdpt.entries[pdpt_index] & HUGE_PAGE != 0 {
+                return Err("cannot replace huge-page mapping");
+            }
+            pd_frame
+        };
+
+        let pd = table_at(pd_frame);
+        let pt_frame = pd.entries[pd_index] & 0x000f_ffff_ffff_f000;
+
+        let pt_frame = if pt_frame == 0 {
+            let frame = allocate_frame_below(BOOTSTRAP_LIMIT)
+                .ok_or("cannot allocate page table")?;
+            zero_table(frame);
+            pd.entries[pd_index] = frame | PRESENT | WRITABLE;
+            frame
+        } else {
+            if pd.entries[pd_index] & HUGE_PAGE != 0 {
+                return Err("cannot replace huge-page mapping");
+            }
+            pt_frame
+        };
+
+        let pt = table_at(pt_frame);
+        pt.entries[pt_index] = physical_frame | PRESENT | WRITABLE;
+        invalidate_page(virtual_address);
     }
 
     Ok(())
