@@ -10,8 +10,9 @@ pub fn init() {
     gdt::init();
     idt::init();
     pit::init();
-
-    unsafe { core::arch::asm!("sti", options(nostack, preserves_flags)); }
-
     diagnostics::write_line(0, b"BENNU KERNEL: GDT + IDT + TIMER ONLINE");
+}
+
+pub fn enable_interrupts() {
+    unsafe { core::arch::asm!("sti", options(nostack, preserves_flags)); }
 }
