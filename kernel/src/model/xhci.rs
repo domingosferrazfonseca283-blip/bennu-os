@@ -6,7 +6,6 @@ pub const XHCI_MAX_PORTS:usize=256;
 pub const XHCI_PAGE_SIZE:u64=4096;
 pub const XHCI_DMA_LIMIT:u64=64*1024*1024;
 pub const TRB_TYPE_LINK:u32=6<<10;
-pub const TRB_TYPE_ENABLE_SLOT:u32=9<<10;
 pub const TRB_TYPE_NOOP_CMD:u32=23<<10;
 pub const TRB_TYPE_TRANSFER_EVENT:u32=32<<10;
 pub const TRB_TYPE_CMD_COMPLETION:u32=33<<10;
@@ -22,6 +21,22 @@ pub const USBCMD_RUN_STOP:u32=1<<0;
 pub const USBCMD_HCRST:u32=1<<1;
 pub const USBSTS_HCH:u32=1<<0;
 pub const USBSTS_CNR:u32=1<<11;
+pub const USBCMD_INTE:u32=1<<2;
+pub const IMAN_INTERRUPT_PENDING:u32=1<<0;
+pub const IMAN_INTERRUPT_ENABLE:u32=1<<1;
+pub const PORTSC_CCS:u32=1<<0;
+pub const PORTSC_PED:u32=1<<1;
+pub const PORTSC_OCA:u32=1<<3;
+pub const PORTSC_PR:u32=1<<4;
+pub const PORTSC_PP:u32=1<<9;
+pub const PORTSC_CSC:u32=1<<17;
+pub const PORTSC_PRC:u32=1<<21;
+pub const PORTSC_PLC:u32=1<<18;
+pub const PORTSC_CEC:u32=1<<23;
+pub const PORTSC_SPEED_SHIFT:u32=10;
+pub const PORTSC_SPEED_MASK:u32=0xF<<PORTSC_SPEED_SHIFT;
+pub const XHCI_PORT_REG_BASE:u64=0x400;
+pub const XHCI_PORT_REG_STRIDE:u64=0x10;
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -81,7 +96,13 @@ impl XhciRing {
 
 #[repr(C)]
 #[derive(Clone,Copy)]
-pub struct XhciPort { pub index:u8,pub status:u32,pub connected:bool,pub enabled:bool,pub slot:u8 }
+pub struct XhciPort {
+ pub index:u8,pub status:u32,pub connected:bool,pub enabled:bool,pub slot:u8,pub speed:u8,
+}
+impl XhciPort {
+ pub const fn empty(index:u8)->Self { Self{index,status:0,connected:false,enabled:false,slot:0,speed:0} }
+ pub const fn speed(&self)->u8 { self.speed }
+}
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -89,6 +110,7 @@ pub struct XhciController {
  pub object:ObjectId,pub mmio_base:u64,pub slots:u16,pub ports:u8,pub initialized:bool,
  pub dcbaa_phys:u64,pub command_ring_phys:u64,pub event_ring_phys:u64,pub erst_phys:u64,
  pub command_ring:XhciRing,pub event_ring:XhciRing,pub ports_state:[XhciPort;XHCI_MAX_PORTS],
+ pub capability:CapabilityRegisters,
  pub next_slot:u8,
 }
 impl XhciController {
@@ -97,15 +119,17 @@ impl XhciController {
   dcbaa_phys:0,command_ring_phys:0,event_ring_phys:0,erst_phys:0,
   command_ring:XhciRing::EMPTY,event_ring:XhciRing::EMPTY,
   next_slot:1,
-  ports_state:[XhciPort{index:0,status:0,connected:false,enabled:false,slot:0};XHCI_MAX_PORTS],
+  ports_state:[XhciPort::empty(0);XHCI_MAX_PORTS],
+  capability:CapabilityRegisters{cap_length:0,version:0,hcs_params1:0,hcs_params2:0,hcs_params3:0,hcc_params1:0,dboff:0,rtsoff:0,hcc_params2:0},
  };
  pub fn configure(&mut self,cap:CapabilityRegisters,mmio_base:u64)->Result<(),&'static str>{
   if mmio_base==0{return Err("xHCI MMIO base missing");}
   self.mmio_base=mmio_base;
+  self.capability=cap;
   self.slots=cap.max_slots().min(XHCI_MAX_SLOTS as u16);
   self.ports=cap.max_ports().min(XHCI_MAX_PORTS as u8);
   self.command_ring.reset(); self.event_ring.reset();
-  for i in 0..self.ports as usize { self.ports_state[i].index=(i+1) as u8; }
+  for i in 0..self.ports as usize { self.ports_state[i]=XhciPort::empty((i+1) as u8); }
   Ok(())
  }
 }
@@ -154,6 +178,45 @@ pub unsafe fn reset_controller(mmio:u64,cap:CapabilityRegisters)->Result<(),&'st
 }
 
 
+
+pub const fn operational_base(mmio:u64,cap:CapabilityRegisters)->u64 { mmio + cap.cap_length as u64 }
+pub const fn portsc_address(mmio:u64,cap:CapabilityRegisters,port:u8)->u64 {
+ operational_base(mmio,cap) + XHCI_PORT_REG_BASE + XHCI_PORT_REG_STRIDE * (port.saturating_sub(1) as u64)
+}
+pub unsafe fn read_port_status(mmio:u64,cap:CapabilityRegisters,port:u8)->Result<u32,&'static str> {
+ if port==0 || port>cap.max_ports() { return Err("invalid xHCI port"); }
+ Ok(read32(mmio,cap.cap_length as u64 + XHCI_PORT_REG_BASE + XHCI_PORT_REG_STRIDE*((port-1) as u64)))
+}
+pub unsafe fn reset_port(mmio:u64,cap:CapabilityRegisters,port:u8)->Result<(),&'static str> {
+ if port==0 || port>cap.max_ports() { return Err("invalid xHCI port"); }
+ let addr=portsc_address(mmio,cap,port);
+ let mut v=read32(mmio,cap.cap_length as u64 + XHCI_PORT_REG_BASE + XHCI_PORT_REG_STRIDE*((port-1) as u64));
+ if v & PORTSC_CCS == 0 { return Err("USB device not connected"); }
+ v &= !(PORTSC_CSC|PORTSC_PRC|PORTSC_PLC|PORTSC_CEC);
+ v |= PORTSC_PR;
+ core::ptr::write_volatile(addr as *mut u32,v);
+ for _ in 0..1_000_000 {
+  let now=core::ptr::read_volatile(addr as *const u32);
+  if now & PORTSC_PR == 0 {
+   if now & PORTSC_PED != 0 { return Ok(()); }
+   return Err("USB port reset completed without enable");
+  }
+  core::hint::spin_loop();
+ }
+ Err("USB port reset timeout")
+}
+pub unsafe fn acknowledge_port_changes(mmio:u64,cap:CapabilityRegisters,port:u8) {
+ if port==0 || port>cap.max_ports() { return; }
+ let addr=portsc_address(mmio,cap,port);
+ let v=core::ptr::read_volatile(addr as *const u32);
+ let clear=v & (PORTSC_CSC|PORTSC_PRC|PORTSC_PLC|PORTSC_CEC);
+ if clear!=0 { core::ptr::write_volatile(addr as *mut u32,clear); }
+}
+pub unsafe fn ring_doorbell(mmio:u64,cap:CapabilityRegisters,target:u8) {
+ let addr=mmio + cap.dboff as u64 + (target as u64)*4;
+ core::ptr::write_volatile(addr as *mut u32,0);
+}
+
 #[repr(C)]
 #[derive(Clone,Copy)]
 pub struct EventRingSegment { pub base:u64,pub size:u16,pub reserved:u16 }
@@ -186,10 +249,12 @@ pub unsafe fn start_controller(controller:&mut XhciController,cap:CapabilityRegi
     core::ptr::write_volatile((op+0x30) as *mut u64,controller.dcbaa_phys);
     let rt=controller.mmio_base+cap.rtsoff as u64;
     let ir0=rt+0x20;
+    core::ptr::write_volatile((ir0+0x00) as *mut u32,IMAN_INTERRUPT_ENABLE);
+    core::ptr::write_volatile((ir0+0x04) as *mut u32,0);
     core::ptr::write_volatile((ir0+0x08) as *mut u32,1);
     core::ptr::write_volatile((ir0+0x10) as *mut u64,controller.erst_phys);
     core::ptr::write_volatile((ir0+0x18) as *mut u64,controller.event_ring_phys);
-    write32(op,0,read32(op,0)|USBCMD_RUN_STOP);
+    write32(op,0,read32(op,0)|USBCMD_INTE|USBCMD_RUN_STOP);
     for _ in 0..1_000_000 { if read32(op,4)&USBSTS_HCH==0 { controller.initialized=true; return Ok(()); } core::hint::spin_loop(); }
     Err("xHCI failed to start")
 }
