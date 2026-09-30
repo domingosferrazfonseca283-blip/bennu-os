@@ -7,8 +7,8 @@ pub struct CapabilityId(pub u64);
 impl CapabilityId {
     pub const NULL: Self = Self(0);
 
-    pub const fn new(object: ObjectId, slot: u32) -> Self {
-        Self(object.0 ^ ((slot as u64) << 48))
+    pub const fn new(_object: ObjectId, slot: u32) -> Self {
+        Self((1u64 << 32) | slot as u64)
     }
 }
 
