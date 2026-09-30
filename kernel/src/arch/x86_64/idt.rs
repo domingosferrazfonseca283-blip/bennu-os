@@ -78,6 +78,16 @@ extern "x86-interrupt" fn double_fault_handler(
     halt_forever()
 }
 
+extern "x86-interrupt" fn error_code_handler(
+    frame: InterruptStackFrame,
+    error_code: u64,
+) {
+    let _ = frame;
+    let _ = error_code;
+    super::diagnostics::write_line(1, b"BENNU CPU EXCEPTION (ERR)");
+    halt_forever();
+}
+
 extern "x86-interrupt" fn page_fault_handler(
     frame: InterruptStackFrame,
     error_code: u64,
@@ -91,7 +101,7 @@ extern "x86-interrupt" fn page_fault_handler(
 fn halt_forever() -> ! {
     loop {
         unsafe {
-            asm!("cli", "hlt", options(nomem, nostack, preserves_flags));
+            asm!("cli", "hlt", options(nomem, nostack));
         }
     }
 }
@@ -102,11 +112,25 @@ pub fn init() {
             *entry = IdtEntry::EMPTY;
         }
 
-        IDT[0].set_address(exception_handler as usize as u64);
+        // Install a handler for the architecturally defined exception range.
+        // Error-code exceptions use a different ABI and are installed separately.
+        const ERROR_CODE_VECTORS: [usize; 7] = [8, 10, 11, 12, 13, 14, 17];
+
+        for vector in 0..32 {
+            if !ERROR_CODE_VECTORS.contains(&vector) {
+                IDT[vector].set_address(exception_handler as usize as u64);
+            }
+        }
+
         IDT[3].set_address(breakpoint_handler as usize as u64);
         IDT[8].set_address(
             double_fault_handler as DivergingHandlerWithError as usize as u64,
         );
+
+        for vector in [10usize, 11, 12, 13, 17] {
+            IDT[vector].set_address(error_code_handler as HandlerWithError as usize as u64);
+        }
+
         IDT[14].set_address(page_fault_handler as HandlerWithError as usize as u64);
 
         let idtr = Idtr {
