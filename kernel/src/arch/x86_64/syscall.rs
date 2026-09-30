@@ -1,6 +1,8 @@
 use crate::model::abi::{self, Call, Operation, ResultCode};
 use crate::model::{CapabilityId, ObjectId};
 
+extern "C" { fn bennu_syscall_entry(); }
+
 core::arch::global_asm!(r#"
 .global bennu_syscall_entry
 .type bennu_syscall_entry,@function
