@@ -37,8 +37,8 @@ start2:
     mov cx, 32
     rep stosd
 
-    mov dword [BOOT_INFO + 0], 0x554E4E45
-    mov dword [BOOT_INFO + 4], 0x014F534E
+    mov dword [BOOT_INFO + 0], 0x554F5301
+    mov dword [BOOT_INFO + 4], 0x42454E4E
     mov dword [BOOT_INFO + 8], 1
     mov dword [BOOT_INFO + 12], 56
     mov byte  [BOOT_INFO + 16], dl
@@ -49,8 +49,8 @@ start2:
     mov dword [BOOT_INFO + 36], 0
 
     mov dword [BOOT_INFO + 40], MEMORY_MAP
-    mov dword [BOOT_INFO + 44], 0
-    mov dword [BOOT_INFO + 48], E820_ENTRY_SIZE
+    mov dword [BOOT_INFO + 48], 0
+    mov dword [BOOT_INFO + 52], E820_ENTRY_SIZE
 
     ; Clear the E820 destination area before BIOS writes variable-sized entries.
     mov di, MEMORY_MAP
@@ -62,7 +62,7 @@ start2:
     jc e820_error
 
     mov ax, [e820_count]
-    mov [BOOT_INFO + 44], ax
+    mov [BOOT_INFO + 48], ax
 
     ; Load the kernel from LBA 5 into temporary low memory.
     mov si, dap
