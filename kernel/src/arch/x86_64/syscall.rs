@@ -75,6 +75,20 @@ extern "C" fn bennu_syscall_yield() {
     }
 }
 
+#[inline]
+fn is_canonical_user_address(address: u64) -> bool {
+    address < 0x0000_8000_0000_0000
+}
+
+#[inline]
+fn valid_user_range(base: u64, length: u64) -> bool {
+    if length == 0 || !is_canonical_user_address(base) { return false; }
+    match base.checked_add(length - 1) {
+        Some(end) => is_canonical_user_address(end),
+        None => false,
+    }
+}
+
 #[no_mangle]
 extern "C" fn bennu_syscall_dispatch(frame: *mut RegisterFrame) -> u64 {
     if frame.is_null() {
@@ -100,6 +114,11 @@ extern "C" fn bennu_syscall_dispatch(frame: *mut RegisterFrame) -> u64 {
         9 => Operation::Yield,
         _ => return abi::ABI_STATUS_UNSUPPORTED,
     };
+
+    if !valid_user_range(regs.rdx, if regs.r10 == 0 { 1 } else { regs.r10 }) && matches!(operation, Operation::MemoryMap | Operation::SurfaceCreate | Operation::DeviceSubmit) {
+        regs.rax = abi::ABI_STATUS_INVALID;
+        return abi::ABI_STATUS_INVALID;
+    }
 
     let call = Call {
         operation,
