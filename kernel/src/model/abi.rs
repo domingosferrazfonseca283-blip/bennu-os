@@ -1,0 +1,52 @@
+use super::{CapabilityId, ObjectId};
+
+pub const BENNU_ABI_MAJOR: u16 = 1;
+pub const BENNU_ABI_MINOR: u16 = 0;
+
+#[repr(u16)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Operation {
+    None = 0,
+    ObjectCreate = 1,
+    ObjectQuery = 2,
+    CapabilityGrant = 3,
+    EventWait = 4,
+    EventEmit = 5,
+    MemoryMap = 6,
+    SurfaceCreate = 7,
+    DeviceSubmit = 8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Call {
+    pub operation: Operation,
+    pub flags: u16,
+    pub capability: CapabilityId,
+    pub object: ObjectId,
+    pub argument: u64,
+    pub value: u64,
+}
+
+impl Call {
+    pub const EMPTY: Self = Self {
+        operation: Operation::None,
+        flags: 0,
+        capability: CapabilityId::NULL,
+        object: ObjectId::NULL,
+        argument: 0,
+        value: 0,
+    };
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ResultCode {
+    pub status: u64,
+    pub value: u64,
+}
+
+impl ResultCode {
+    pub const OK: Self = Self { status: 0, value: 0 };
+    pub const fn error(code: u64) -> Self { Self { status: code, value: 0 } }
+}
