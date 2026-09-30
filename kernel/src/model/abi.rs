@@ -61,11 +61,14 @@ pub const ABI_STATUS_UNSUPPORTED: u64 = 4;
 pub const ABI_STATUS_YIELD: u64 = 5;
 
 pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
+    use super::CapabilityRights as R;
+
     match call.operation {
         Operation::Yield => ResultCode::error(ABI_STATUS_YIELD),
         Operation::None => ResultCode::error(ABI_STATUS_INVALID),
+
         Operation::ObjectQuery => {
-            if !super::runtime::permits(cell, call.capability, call.object, super::CapabilityRights::READ) {
+            if !super::runtime::permits(cell, call.capability, call.object, R::READ) {
                 return ResultCode::error(ABI_STATUS_DENIED);
             }
             if super::runtime::object_exists(call.object) {
@@ -74,25 +77,76 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
                 ResultCode::error(ABI_STATUS_NOT_FOUND)
             }
         }
+
+        Operation::ObjectCreate => {
+            if !super::runtime::permits(cell, call.capability, call.object, R::ADMIN) {
+                return ResultCode::error(ABI_STATUS_DENIED);
+            }
+            let kind = match call.value as u8 {
+                1 => super::ObjectKind::Memory,
+                2 => super::ObjectKind::Device,
+                3 => super::ObjectKind::Data,
+                4 => super::ObjectKind::Surface,
+                5 => super::ObjectKind::EventPort,
+                6 => super::ObjectKind::Cell,
+                _ => return ResultCode::error(ABI_STATUS_INVALID),
+            };
+            match super::runtime::create_object(kind, cell.0) {
+                Ok(id) => ResultCode { status: ABI_STATUS_OK, value: id.0 },
+                Err(_) => ResultCode::error(ABI_STATUS_INVALID),
+            }
+        }
+
+        Operation::CapabilityGrant => {
+            if !super::runtime::permits(cell, call.capability, call.object, R::SHARE.union(R::ADMIN)) {
+                return ResultCode::error(ABI_STATUS_DENIED);
+            }
+            let target = super::CellId(call.argument as u32);
+            let rights = R(call.value as u32);
+            match super::runtime::grant(target, call.object, rights) {
+                Ok(id) => ResultCode { status: ABI_STATUS_OK, value: id.0 },
+                Err(_) => ResultCode::error(ABI_STATUS_DENIED),
+            }
+        }
+
+        Operation::EventWait => {
+            if !super::runtime::permits(cell, call.capability, call.object, R::OBSERVE) {
+                return ResultCode::error(ABI_STATUS_DENIED);
+            }
+            match super::runtime::poll() {
+                Some(event) => ResultCode { status: ABI_STATUS_OK, value: event.value },
+                None => ResultCode::error(ABI_STATUS_NOT_FOUND),
+            }
+        }
+
         Operation::MemoryMap => {
             match super::runtime::memory_map(
-                cell,
-                call.capability,
-                call.object,
-                call.argument,
-                (call.value & 1) != 0,
+                cell, call.capability, call.object, call.argument, (call.value & 1) != 0,
             ) {
                 Ok(address) => ResultCode { status: ABI_STATUS_OK, value: address },
                 Err(_) => ResultCode::error(ABI_STATUS_DENIED),
             }
         }
+
+        Operation::SurfaceCreate => {
+            if !super::runtime::permits(cell, call.capability, call.object, R::DRAW) {
+                return ResultCode::error(ABI_STATUS_DENIED);
+            }
+            match super::runtime::create_object(super::ObjectKind::Surface, cell.0) {
+                Ok(id) => ResultCode { status: ABI_STATUS_OK, value: id.0 },
+                Err(_) => ResultCode::error(ABI_STATUS_INVALID),
+            }
+        }
+
+        Operation::DeviceSubmit => {
+            if !super::runtime::permits(cell, call.capability, call.object, R::DEVICE.union(R::WRITE)) {
+                return ResultCode::error(ABI_STATUS_DENIED);
+            }
+            ResultCode::error(ABI_STATUS_UNSUPPORTED)
+        }
+
         Operation::EventEmit => {
-            if !super::runtime::permits(
-                cell,
-                call.capability,
-                call.object,
-                super::CapabilityRights::OBSERVE,
-            ) {
+            if !super::runtime::permits(cell, call.capability, call.object, R::WRITE) {
                 return ResultCode::error(ABI_STATUS_DENIED);
             }
             match super::runtime::emit(super::Event::new(
@@ -105,6 +159,5 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
                 Err(_) => ResultCode::error(ABI_STATUS_INVALID),
             }
         }
-        _ => ResultCode::error(ABI_STATUS_UNSUPPORTED),
     }
 }
