@@ -182,3 +182,18 @@ A fronteira de chamada nativa usa `int 0x80`. O número da operação entra em `
 O primeiro programa de userspace é deliberadamente mínimo: executa em uma página não gravável, usa uma stack USER não executável e repete a operação de yield. Isso valida a direção completa Ring 3 → syscall → kernel scheduler → Ring 3 sem transformar o userspace em uma extensão privilegiada do kernel.
 
 As páginas de userspace ocupam uma região virtual privada da raiz da Cell. A raiz começa com o espaço de kernel compartilhado estruturalmente, mas as novas tabelas para a região USER são criadas por Cell. A separação avançada continuará a eliminar dependências compartilhadas e a introduzir copy-in/copy-out, reclaim e políticas de mapeamento baseadas em Capability.
+
+
+## Isolamento real de Address Spaces
+
+Uma Cell executável agora nasce com um PML4 próprio vazio. Ela não herda automaticamente os mapeamentos do kernel. O espaço da Cell recebe apenas páginas supervisoras mínimas para a entrada de execução, stack de kernel e entrada de timer/syscall, além das páginas USER explicitamente instaladas.
+
+O CR3 do kernel é mantido separadamente. A entrada int 0x80 captura o CR3 da Cell e troca imediatamente para o CR3 do kernel antes de acessar estado, capacidades ou objetos. Na entrada Ring 3, o caminho inverso é explícito: o trampolim carrega o CR3 da Cell antes de executar iretq.
+
+A stack de kernel da Cell permanece mapeada como supervisor-only no espaço da própria Cell porque a CPU precisa de uma stack válida para a transição CPL3→CPL0 antes que qualquer código de entrada possa trocar CR3. Isso não concede leitura/escrita ao código Ring 3.
+
+## Fronteira de memória do usuário
+
+O kernel não deve dereferenciar diretamente ponteiros fornecidos pela ABI. A camada de memória oferece tradução validada de páginas USER e primitivas copy_from_user / copy_to_user, verificando canonicalidade, presença da página, bit USER e, para escrita, WRITABLE.
+
+O primeiro backend de MemoryMap segue a mesma regra: somente Memory/Data Objects com Capability contendo MAP podem ser mapeados. Uma escrita exige também WRITE. O endereço físico não é fornecido pela Cell; o backing frame pertence ao Object e é resolvido pelo runtime.
