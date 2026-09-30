@@ -23,6 +23,15 @@ impl DeviceFabric {
   self.devices[self.device_count]=DeviceRecord{descriptor:DeviceDescriptor{object,class,vendor:pci.vendor,product:pci.device_id,capabilities:super::CapabilityRights::OBSERVE.union(super::CapabilityRights::DEVICE)},pci};
   self.device_count+=1; Ok(object)
  }
+ pub fn discover_xhci(&mut self,pci:PciDevice,cap:super::xhci::CapabilityRegisters)->Result<ObjectId,&'static str>{
+  if !super::pci::is_xhci(&pci) { return Err("PCI device is not xHCI"); }
+  let mmio=super::pci::first_mmio_bar(&pci).ok_or("xHCI MMIO BAR missing")?;
+  let mut controller=XhciController::EMPTY;
+  controller.object=pci.object;
+  controller.configure(cap,mmio)?;
+  self.register_xhci(controller)?;
+  Ok(pci.object)
+ }
  pub fn register_xhci(&mut self,controller:XhciController)->Result<(),&'static str>{
   if self.controller_count>=MAX_CONTROLLERS{return Err("controller table full");}
   self.controllers[self.controller_count]=controller;self.controller_count+=1;Ok(())
