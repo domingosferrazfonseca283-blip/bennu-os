@@ -1,6 +1,7 @@
 use super::capability::{Capability, CapabilityId, CapabilityRights};
 use super::object::ObjectId;
 use super::MAX_CAPABILITIES_PER_CELL;
+use crate::arch::x86_64::execution::Context;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -32,6 +33,7 @@ pub struct Cell {
     pub state: CellState,
     pub root: ObjectId,
     pub entry: Option<CellEntry>,
+    pub context: Context,
     capabilities: [Capability; MAX_CAPABILITIES_PER_CELL],
     capability_count: usize,
 }
@@ -43,6 +45,7 @@ impl Cell {
             state: CellState::Empty,
             root: ObjectId::NULL,
             entry: None,
+            context: Context::EMPTY,
             capabilities: [Capability::EMPTY; MAX_CAPABILITIES_PER_CELL],
             capability_count: 0,
         }
@@ -54,6 +57,7 @@ impl Cell {
             state: CellState::Ready,
             root,
             entry: None,
+            context: Context::EMPTY,
             capabilities: [Capability::EMPTY; MAX_CAPABILITIES_PER_CELL],
             capability_count: 0,
         }
@@ -102,6 +106,14 @@ impl Cell {
     pub fn capability_count(&self) -> usize {
         self.capability_count
     }
+
+    pub fn set_context(&mut self, context: Context) -> Result<(), &'static str> {
+        if !context.is_initialized() { return Err("cell context is not initialized"); }
+        self.context = context;
+        Ok(())
+    }
+
+    pub fn context(&self) -> Context { self.context }
 
     pub fn bind_entry(&mut self, entry: CellEntry) -> Result<(), &'static str> {
         if self.state == CellState::Empty || self.state == CellState::Stopped {
