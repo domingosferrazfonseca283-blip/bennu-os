@@ -368,6 +368,7 @@ pub fn device_submit(
     argument: u64,
     value: u64,
     buffer: u64,
+    length: u64,
     token: u64,
 ) -> Result<(), &'static str> {
     let guard = RUNTIME.lock();
@@ -384,7 +385,7 @@ pub fn device_submit(
     }
     drop(guard);
     super::io_fabric::submit_device(super::DeviceRequest {
-        device: object, opcode, flags, argument, value, buffer, length: 1, token,
+        device: object, opcode, flags, argument, value, buffer, length, token,
     })
 }
 
