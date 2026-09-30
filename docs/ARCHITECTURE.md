@@ -170,7 +170,7 @@ O Bennu agora possui uma primeira fronteira de chamada nativa x86_64 em int 0x80
 - o resultado regressa pelo mesmo frame de registos;
 - o vetor é exposto como gate utilizável por código de nível utilizador quando existirem Cells em CPL3.
 
-A implementação atual é deliberadamente pequena. ObjectQuery e EventEmit já possuem caminhos concretos; as restantes operações continuam explícitas como não suportadas até terem semântica e validação completas.
+A implementação atual é deliberadamente pequena. ObjectQuery, EventEmit e o primeiro caminho de DeviceSubmit possuem semântica concreta; as restantes operações continuam explícitas até terem validação e execução completas.
 
 
 ## Userspace nativo
