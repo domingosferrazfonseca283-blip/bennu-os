@@ -78,11 +78,6 @@ pub fn discover_legacy(bus_limit:u8, device_limit:u8, function_limit:u8) -> usiz
                 let device = PciDevice {
                     object, address, vendor, device_id, class, subclass, prog_if, bars,
                 };
-                let _ = super::graph::link(
-                    object,
-                    object,
-                    super::RelationKind::Contains,
-                );
                 let _ = super::runtime::emit(super::Event::new(
                     super::EventKind::DeviceAttached,
                     object,
