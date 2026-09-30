@@ -91,3 +91,46 @@ impl XhciController {
   Ok(())
  }
 }
+
+
+unsafe fn read32(base:u64,offset:u64)->u32 {
+    core::ptr::read_volatile((base + offset) as *const u32)
+}
+unsafe fn write32(base:u64,offset:u64,value:u32) {
+    core::ptr::write_volatile((base + offset) as *mut u32,value);
+}
+
+pub unsafe fn probe_mmio(mmio:u64)->CapabilityRegisters {
+    CapabilityRegisters {
+        cap_length:read32(mmio,0) as u8,
+        version:(read32(mmio,2) & 0xffff) as u16,
+        hcs_params1:read32(mmio,4),
+        hcs_params2:read32(mmio,8),
+        hcs_params3:read32(mmio,12),
+        hcc_params1:read32(mmio,16),
+        dboff:read32(mmio,20),
+        rtsoff:read32(mmio,24),
+        hcc_params2:read32(mmio,28),
+    }
+}
+
+pub unsafe fn reset_controller(mmio:u64,cap:CapabilityRegisters)->Result<(),&'static str> {
+    let op=mmio + cap.cap_length as u64;
+    let mut cmd=read32(op,0);
+    cmd &= !USBCMD_RUN_STOP;
+    write32(op,0,cmd);
+    for _ in 0..1_000_000 {
+        if read32(op,4) & USBSTS_HCH != 0 { break; }
+        core::hint::spin_loop();
+    }
+    if read32(op,4) & USBSTS_HCH == 0 { return Err("xHCI did not halt"); }
+    write32(op,0,read32(op,0) | USBCMD_HCRST);
+    for _ in 0..1_000_000 {
+        let cmd_now=read32(op,0);
+        if cmd_now & USBCMD_HCRST == 0 { break; }
+        core::hint::spin_loop();
+    }
+    if read32(op,0) & USBCMD_HCRST != 0 { return Err("xHCI reset timeout"); }
+    if read32(op,4) & USBSTS_CNR != 0 { return Err("xHCI controller not ready"); }
+    Ok(())
+}
