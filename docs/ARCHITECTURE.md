@@ -58,8 +58,6 @@ Além do bring-up x86_64, o kernel já começou a implementar o modelo próprio 
 - runtime inicial para criação de Objects, Cells, concessão de capabilities e eventos;
 - Cell raiz criada durante a inicialização do kernel.
 
-## Estado atual do kernel
-
 O bring-up x86_64 já possui uma fronteira clara entre o bootloader e o kernel:
 
 - Stage 2 entra em long mode;
@@ -70,7 +68,7 @@ O bring-up x86_64 já possui uma fronteira clara entre o bootloader e o kernel:
 - Stage 2 publica um protocolo `BootInfo` próprio do Bennu;
 - o protocolo transporta o dispositivo de boot, localização/tamanho do kernel e o mapa físico E820;
 - o kernel já possui a primeira camada de alocação de frames físicos, recusando memória abaixo de 1 MiB e a região ocupada pelo próprio kernel;
-- o próximo salto é fazer o kernel assumir as próprias tabelas de páginas e construir o heap.
+- o próximo salto é completar a memória virtual e tornar o modelo de estado seguro para concorrência e interrupções.
 
 A ABI de interrupção x86-interrupt do Rust é usada apenas na camada de baixo nível; ela não define a API pública do sistema operacional.
 
