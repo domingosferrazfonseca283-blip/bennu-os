@@ -92,19 +92,21 @@ pub fn entry(cell: CellId) -> Option<super::CellEntry> {
     state.cells[index].entry
 }
 
-pub fn context_ptr(cell: CellId) -> Option<*mut crate::arch::x86_64::execution::Context> {
+pub fn context_ptr(cell: CellId) -> Option<(*mut crate::arch::x86_64::execution::Context, u64)> {
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
     let index = cell.0 as usize;
     if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
         return None;
     }
-    Some(&mut state.cells[index].context as *mut _)
+    Some((&mut state.cells[index].context as *mut _, state.cells[index].address_space_root()))
 }
 
 pub fn prepare_cell_context(cell: CellId, trampoline: u64) -> Result<(), &'static str> {
     let stack = crate::memory::allocate_frame_below(crate::memory::PAGE_SIZE * 16384)
         .ok_or("no physical frame for cell stack")?;
+
+    let root = crate::memory::paging::create_address_space_root()?;
 
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
@@ -112,6 +114,9 @@ pub fn prepare_cell_context(cell: CellId, trampoline: u64) -> Result<(), &'stati
     if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
         return Err("cell does not exist");
     }
+
+    state.cells[index].attach_address_space_root(root)?;
+
     unsafe {
         crate::arch::x86_64::execution::prepare_context(
             &mut state.cells[index].context,
