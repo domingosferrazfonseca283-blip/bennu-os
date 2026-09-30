@@ -27,7 +27,7 @@ pub fn on_interrupt() {
 pub fn ticks() -> u64 { TICKS.load(Ordering::Acquire) }
 
 pub fn take_tick() -> bool {
-    PENDING.fetch_update(Ordering::Acquire, Ordering::Relaxed, |v| {
+    PENDING.try_update(Ordering::Acquire, Ordering::Relaxed, |v| {
         if v == 0 { None } else { Some(v - 1) }
     }).is_ok()
 }
