@@ -122,6 +122,23 @@ impl Cell {
         self.capability_count
     }
 
+    pub fn capability_rights(
+        &self,
+        capability: CapabilityId,
+        object: ObjectId,
+    ) -> Option<CapabilityRights> {
+        for index in 0..MAX_CAPABILITIES_PER_CELL {
+            let entry = &self.capabilities[index];
+            if entry.id == capability
+                && entry.object == object
+                && entry.generation == capability.generation()
+            {
+                return Some(entry.rights);
+            }
+        }
+        None
+    }
+
     pub fn revoke(&mut self, capability: CapabilityId) -> Result<(), &'static str> {
         for index in 0..MAX_CAPABILITIES_PER_CELL {
             if self.capabilities[index].id == capability {
