@@ -1,4 +1,5 @@
 pub mod diagnostics;
+pub mod execution;
 pub mod gdt;
 pub mod idt;
 pub mod pit;
