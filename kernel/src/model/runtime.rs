@@ -49,6 +49,18 @@ pub fn service_device_io() {
     let _ = emit(super::Event::new(kind, request.device, super::ObjectId::NULL, request.token));
 }
 
+pub fn service_device_events() {
+    let completion = DEVICE_FABRIC.lock().get_mut().service_events();
+    if let Some((device, token, _slot, completion_code)) = completion {
+        let _ = emit(super::Event::new(
+            super::EventKind::DeviceCompleted,
+            device,
+            super::ObjectId::NULL,
+            ((completion_code as u64) << 56) | (token & 0x00ff_ffff_ffff_ffff),
+        ));
+    }
+}
+
 
 pub fn init() {
     *RUNTIME.lock().get_mut() = RuntimeState::EMPTY;
