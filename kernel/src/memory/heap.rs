@@ -69,6 +69,8 @@ impl BennuHeap {
     }
 }
 
+unsafe impl Sync for BennuHeap {}
+
 unsafe impl GlobalAlloc for BennuHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // The kernel is single-threaded during bootstrap. A lock-free heap
