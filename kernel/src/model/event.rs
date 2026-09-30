@@ -11,7 +11,8 @@ pub enum EventKind {
     DeviceAttached = 5,
     DeviceDetached = 6,
     Wake = 7,
-    DeviceCompleted = 8,
+    DeviceQueued = 8,
+    DeviceCompleted = 9,
 }
 
 #[repr(C)]
