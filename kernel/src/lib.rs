@@ -32,16 +32,22 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
 
     if let Ok(device) = model::runtime::create_object(model::ObjectKind::Device, 0) {
         let _ = model::graph::link(root, device, model::RelationKind::Contains);
-        let _ = model::runtime::grant(model::CellId(1), device, model::CapabilityRights::OBSERVE);
+        let _ = model::runtime::grant(
+            model::CellId(1),
+            device,
+            model::CapabilityRights::OBSERVE,
+        );
         arch::diagnostics::write_line(1, b"BENNU MODEL: ROOT CAPABILITY ONLINE");
+    }
 
     if model::runtime::bind_entry(model::CellId(1), bootstrap_cell).is_ok() {
         match model::runtime::run_once(model::CellId(1)) {
-            Ok(model::CellAction::Stop) => arch::diagnostics::write_line(1, b"BENNU EXEC: CELL COMPLETED"),
+            Ok(model::CellAction::Stop) => {
+                arch::diagnostics::write_line(1, b"BENNU EXEC: CELL COMPLETED");
+            }
             Ok(_) => arch::diagnostics::write_line(1, b"BENNU EXEC: CELL YIELDED"),
             Err(_) => arch::diagnostics::write_line(1, b"BENNU EXEC: CELL FAILED"),
         }
-    }
     }
 
     if boot_info.is_null() {
