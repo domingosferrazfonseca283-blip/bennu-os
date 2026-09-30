@@ -138,6 +138,19 @@ pub fn prepare_cell_context(cell: CellId, trampoline: u64) -> Result<(), &'stati
         true,
     )?;
 
+    let timer = crate::arch::x86_64::idt::timer_handler_address();
+    let timer_page = timer & !(crate::memory::PAGE_SIZE - 1);
+    if timer_page >= 64 * 1024 * 1024 {
+        return Err("timer handler is outside bootstrap kernel mapping");
+    }
+    crate::memory::paging::map_supervisor_page_in_root(
+        root,
+        timer_page,
+        timer_page,
+        false,
+        true,
+    )?;
+
     unsafe {
         crate::arch::x86_64::execution::prepare_context(
             &mut state.cells[index].context,
