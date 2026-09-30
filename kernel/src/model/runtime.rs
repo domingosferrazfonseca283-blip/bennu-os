@@ -14,6 +14,7 @@ struct RuntimeState {
     event_head: usize,
     event_tail: usize,
     next_object: usize,
+    memory_frames: [u64; MAX_OBJECTS],
 }
 
 impl RuntimeState {
@@ -25,6 +26,7 @@ impl RuntimeState {
         event_head: 0,
         event_tail: 0,
         next_object: 1,
+        memory_frames: [0; MAX_OBJECTS],
     };
 }
 
@@ -53,6 +55,13 @@ fn emit_unlocked(state: &mut RuntimeState, event: Event) -> Result<(), &'static 
 }
 
 pub fn create_object(kind: ObjectKind, owner: u32) -> Result<ObjectId, &'static str> {
+    let backing = match kind {
+        ObjectKind::Memory | ObjectKind::Data => {
+            crate::memory::allocate_frame_below(64 * 1024 * 1024)
+                .ok_or("no physical frame for memory object")?
+        }
+        _ => 0,
+    };
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
     for offset in 0..MAX_OBJECTS {
@@ -62,6 +71,7 @@ pub fn create_object(kind: ObjectKind, owner: u32) -> Result<ObjectId, &'static 
         state.generations[index] = generation;
         let id = ObjectId::new(index as u32, generation);
         state.objects[index] = ResourceObject { id, kind, owner, flags: 0 };
+        state.memory_frames[index] = backing;
         state.next_object = (index + 1) % MAX_OBJECTS;
         let _ = emit_unlocked(state, Event::new(EventKind::ResourceCreated, id, ObjectId::NULL, 0));
         return Ok(id);
@@ -79,6 +89,7 @@ pub fn create_cell(id: CellId, root: ObjectId) -> Result<(), &'static str> {
     }
     if !object_exists_unlocked(state, root) { return Err("cell root does not exist"); }
     state.cells[index] = Cell::create(id, root);
+    let _ = state.cells[index].grant(root, CapabilityRights::ADMIN.union(CapabilityRights::READ).union(CapabilityRights::MAP));
     Ok(())
 }
 
@@ -245,6 +256,50 @@ pub fn run_once(cell: CellId) -> Result<super::CellAction, &'static str> {
         super::CellAction::Stop => CellState::Stopped,
     };
     Ok(action)
+}
+
+pub fn memory_map(
+    cell: CellId,
+    capability: CapabilityId,
+    object: ObjectId,
+    virtual_address: u64,
+    writable: bool,
+) -> Result<u64, &'static str> {
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+    let cell_index = cell.0 as usize;
+    if cell_index >= MAX_CELLS || state.cells[cell_index].state == CellState::Empty {
+        return Err("cell does not exist");
+    }
+    if !state.cells[cell_index].permits(capability, object, CapabilityRights::MAP) {
+        return Err("memory map capability denied");
+    }
+
+    let object_index = object.index();
+    if object_index >= MAX_OBJECTS
+        || state.objects[object_index].id != object
+        || !matches!(state.objects[object_index].kind, ObjectKind::Memory | ObjectKind::Data)
+    {
+        return Err("object is not mappable memory");
+    }
+
+    let frame = state.memory_frames[object_index];
+    if frame == 0 {
+        return Err("memory object has no backing frame");
+    }
+    if writable && !state.cells[cell_index].permits(capability, object, CapabilityRights::WRITE) {
+        return Err("writable mapping requires WRITE capability");
+    }
+
+    let root = state.cells[cell_index].address_space_root;
+    crate::memory::paging::map_user_page_in_root(
+        root,
+        virtual_address & !(crate::memory::PAGE_SIZE - 1),
+        frame,
+        writable,
+        false,
+    )?;
+    Ok(virtual_address & !(crate::memory::PAGE_SIZE - 1))
 }
 
 pub fn grant(cell: CellId, object: ObjectId, rights: CapabilityRights) -> Result<CapabilityId, &'static str> {
