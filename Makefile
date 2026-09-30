@@ -1,4 +1,4 @@
-KERNEL_TARGET=x86_64-bennu.json
+KERNEL_TARGET=kernel/x86_64-bennu.json
 KERNEL_BIN=build/kernel.bin
 STAGE1=build/stage1.bin
 STAGE2=build/stage2.bin
@@ -10,7 +10,7 @@ all: image
 
 image:
 	mkdir -p build
-	cargo build --manifest-path kernel/Cargo.toml --target kernel/$(KERNEL_TARGET) --release -Zbuild-std=core
+	RUSTFLAGS="-C link-arg=-Tkernel/linker.ld" cargo build --manifest-path kernel/Cargo.toml --target $(KERNEL_TARGET) --release -Zbuild-std=core
 	llvm-objcopy -O binary target/$(KERNEL_TARGET)/release/bennu-kernel $(KERNEL_BIN)
 	nasm -f bin boot/stage1.asm -o $(STAGE1)
 	nasm -f bin boot/stage2.asm -o $(STAGE2)
