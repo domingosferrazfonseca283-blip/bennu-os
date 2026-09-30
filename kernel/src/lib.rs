@@ -70,6 +70,31 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     unsafe { memory::heap::init(); }
     arch::diagnostics::write_line(6, b"BENNU MEMORY: KERNEL HEAP ONLINE");
 
+    if let Some(pci) = model::pci::find_xhci_legacy(32, 32, 8) {
+        if let Some(mmio) = model::pci::first_mmio_bar(&pci) {
+            match memory::paging::map_mmio(mmio, 64 * 1024) {
+                Ok(mapped) => {
+                    let cap = unsafe { model::xhci::probe_mmio(mapped) };
+                    let mut fabric = model::DeviceFabric::empty();
+                    if fabric.register_pci(pci, model::DeviceClass::UsbController).is_ok() {
+                        let mut controller = model::XhciController::EMPTY;
+                        controller.object = pci.object;
+                        if controller.configure(cap, mapped).is_ok() {
+                            let reset = unsafe { model::xhci::reset_controller(mapped, cap) };
+                            if reset.is_ok() && fabric.register_xhci(controller).is_ok() {
+                                arch::diagnostics::write_line(6, b"BENNU USB: xHCI CONTROLLER READY");
+                            } else {
+                                arch::diagnostics::write_line(5, b"BENNU USB: xHCI RESET FAILED");
+                            }
+                        }
+                    }
+                }
+                Err(_) => arch::diagnostics::write_line(5, b"BENNU USB: xHCI MMIO MAP FAILED"),
+            }
+        }
+    } else {
+        arch::diagnostics::write_line(6, b"BENNU USB: NO xHCI CONTROLLER");
+
     arch::enable_interrupts();
     arch::diagnostics::write_line(6, b"BENNU KERNEL: INTERRUPTS ENABLED");
 
