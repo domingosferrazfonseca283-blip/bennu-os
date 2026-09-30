@@ -10,11 +10,12 @@
 - [ ] Toolchain totalmente reprodutível
 
 ## Fase 1 — Kernel
-- [ ] GDT
-- [ ] IDT
-- [ ] exceções de CPU
-- [ ] interrupções
-- [ ] timer
+- [x] GDT própria do kernel
+- [x] IDT própria do kernel
+- [x] primeira camada de exceções CPU
+- [ ] interrupções externas
+- [ ] PIC/APIC
+- [ ] timer HPET/PIT/APIC
 - [ ] memória física
 - [ ] paging
 - [ ] heap do kernel
@@ -23,9 +24,9 @@
 - [ ] IPC
 
 ## Fase 2 — Plataforma USB
+- [ ] identificação robusta do dispositivo de boot
 - [ ] controladores USB
 - [ ] armazenamento USB
-- [ ] identificação do dispositivo de boot
 - [ ] BennuFS
 - [ ] journaling/recuperação
 - [ ] relógio e temporizadores
