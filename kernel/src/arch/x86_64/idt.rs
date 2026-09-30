@@ -78,8 +78,32 @@ extern "x86-interrupt" fn breakpoint_handler(frame: InterruptStackFrame) {
 }
 
 extern "x86-interrupt" fn timer_handler(frame: InterruptStackFrame) {
-    let _ = frame;
+    let from_user = frame.code_segment & 0x3 == 0x3;
+    unsafe {
+        if super::super::memory::paging::switch_address_space(
+            super::super::memory::paging::kernel_root(),
+        ).is_err() {
+            halt_forever();
+        }
+    }
     super::pit::on_interrupt();
+    if from_user {
+        if let Some(root) = super::super::model::scheduler::current_cell()
+            .and_then(super::super::model::runtime::cell_address_space_root)
+        {
+            unsafe {
+                if super::super::memory::paging::switch_address_space(root).is_err() {
+                    halt_forever();
+                }
+            }
+        } else {
+            halt_forever();
+        }
+    }
+}
+
+pub fn timer_handler_address() -> u64 {
+    timer_handler as usize as u64
 }
 
 extern "x86-interrupt" fn double_fault_handler(
