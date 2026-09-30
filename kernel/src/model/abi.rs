@@ -136,10 +136,16 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
         }
 
         Operation::DeviceSubmit => {
-            if !super::runtime::permits(cell, call.capability, call.object, R::DEVICE.union(R::WRITE)) {
-                return ResultCode::error(ABI_STATUS_DENIED);
+            let opcode = (call.flags as u32) & 0xffff;
+            let flags = (call.flags as u32) >> 16;
+            let token = call.value;
+            match super::runtime::device_submit(
+                cell, call.capability, call.object, opcode, flags,
+                call.argument, 0, 0, token,
+            ) {
+                Ok(()) => ResultCode::OK,
+                Err(_) => ResultCode::error(ABI_STATUS_DENIED),
             }
-            ResultCode::error(ABI_STATUS_UNSUPPORTED)
         }
 
         Operation::EventEmit => {
