@@ -17,6 +17,9 @@ const HUGE_PAGE: u64 = 1 << 7;
 const BOOTSTRAP_LIMIT: u64 = 64 * 1024 * 1024;
 const IDENTITY_LIMIT: u64 = 64 * 1024 * 1024;
 
+#[no_mangle]
+pub static mut BENNU_KERNEL_ROOT: u64 = 0;
+
 #[repr(C, align(4096))]
 struct PageTable {
     entries: [u64; PAGE_TABLE_ENTRIES],
@@ -72,6 +75,7 @@ pub fn init() -> Result<(), &'static str> {
         }
 
         load_cr3(pml4_frame);
+        BENNU_KERNEL_ROOT = pml4_frame;
     }
 
     Ok(())
@@ -84,15 +88,11 @@ pub fn init() -> Result<(), &'static str> {
 /// being brought up.
 pub fn current_root() -> u64 { unsafe { read_cr3() } }
 
+pub fn kernel_root() -> u64 { unsafe { BENNU_KERNEL_ROOT } }
+
 pub fn create_address_space_root() -> Result<u64, &'static str> {
-    let root=allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space root")?;
-    unsafe {
-        let dst=zero_table(root);
-        let src=table_at(read_cr3());
-        for i in 0..PAGE_TABLE_ENTRIES {
-            dst.entries[i]=src.entries[i];
-        }
-    }
+    let root = allocate_frame_below(BOOTSTRAP_LIMIT).ok_or("cannot allocate address-space root")?;
+    unsafe { zero_table(root); }
     Ok(root)
 }
 
@@ -104,6 +104,16 @@ pub unsafe fn switch_address_space(root:u64) -> Result<(), &'static str> {
 
 pub fn map_page_in_root(root: u64, virtual_address: u64, physical_frame: u64) -> Result<(), &'static str> {
     map_page_in_root_with_flags(root, virtual_address, physical_frame, false, true, true)
+}
+
+pub fn map_supervisor_page_in_root(
+    root: u64,
+    virtual_address: u64,
+    physical_frame: u64,
+    writable: bool,
+    executable: bool,
+) -> Result<(), &'static str> {
+    map_page_in_root_with_flags(root, virtual_address, physical_frame, false, writable, executable)
 }
 
 pub fn map_user_page_in_root(
