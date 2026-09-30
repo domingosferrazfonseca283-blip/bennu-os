@@ -13,6 +13,7 @@ extern "C" fn bootstrap_cell() -> model::CellAction {
 pub fn init(boot_info: *const boot_info::BootInfo) {
     arch::init();
     model::runtime::init();
+    model::init_io_fabric(model::policy::AccessPolicy::USB_FIRST);
 
     let root = match model::runtime::create_object(model::ObjectKind::Cell, 0) {
         Ok(root) => root,
