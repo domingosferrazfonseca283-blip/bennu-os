@@ -3,6 +3,11 @@ use super::ObjectId;
 pub const XHCI_MAX_SLOTS:usize=256;
 pub const XHCI_RING_TRBS:usize=256;
 pub const XHCI_MAX_PORTS:usize=256;
+pub const XHCI_PAGE_SIZE:u64=4096;
+pub const XHCI_DMA_LIMIT:u64=64*1024*1024;
+pub const TRB_TYPE_LINK:u32=6<<10;
+pub const TRB_TYPE_ENABLE_SLOT:u32=9<<10;
+pub const TRB_TYPE_NOOP_CMD:u32=23<<10;
 
 pub const USBCMD_RUN_STOP:u32=1<<0;
 pub const USBCMD_HCRST:u32=1<<1;
@@ -73,11 +78,13 @@ pub struct XhciPort { pub index:u8,pub status:u32,pub connected:bool,pub enabled
 #[derive(Clone,Copy)]
 pub struct XhciController {
  pub object:ObjectId,pub mmio_base:u64,pub slots:u16,pub ports:u8,pub initialized:bool,
+ pub dcbaa_phys:u64,pub command_ring_phys:u64,pub event_ring_phys:u64,pub erst_phys:u64,
  pub command_ring:XhciRing,pub event_ring:XhciRing,pub ports_state:[XhciPort;XHCI_MAX_PORTS],
 }
 impl XhciController {
  pub const EMPTY:Self=Self{
   object:ObjectId::NULL,mmio_base:0,slots:0,ports:0,initialized:false,
+  dcbaa_phys:0,command_ring_phys:0,event_ring_phys:0,erst_phys:0,
   command_ring:XhciRing::EMPTY,event_ring:XhciRing::EMPTY,
   ports_state:[XhciPort{index:0,status:0,connected:false,enabled:false};XHCI_MAX_PORTS],
  };
@@ -133,4 +140,45 @@ pub unsafe fn reset_controller(mmio:u64,cap:CapabilityRegisters)->Result<(),&'st
     if read32(op,0) & USBCMD_HCRST != 0 { return Err("xHCI reset timeout"); }
     if read32(op,4) & USBSTS_CNR != 0 { return Err("xHCI controller not ready"); }
     Ok(())
+}
+
+
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct EventRingSegment { pub base:u64,pub size:u16,pub reserved:u16 }
+pub unsafe fn setup_dma(controller:&mut XhciController)->Result<(),&'static str>{
+    let dcbaa=crate::memory::allocate_frame_below(XHCI_DMA_LIMIT).ok_or("xHCI DCBAA allocation failed")?;
+    let command=crate::memory::allocate_frame_below(XHCI_DMA_LIMIT).ok_or("xHCI command ring allocation failed")?;
+    let event=crate::memory::allocate_frame_below(XHCI_DMA_LIMIT).ok_or("xHCI event ring allocation failed")?;
+    let erst=crate::memory::allocate_frame_below(XHCI_DMA_LIMIT).ok_or("xHCI ERST allocation failed")?;
+    core::ptr::write_bytes(dcbaa as *mut u8,0,4096);
+    core::ptr::write_bytes(command as *mut u8,0,4096);
+    core::ptr::write_bytes(event as *mut u8,0,4096);
+    core::ptr::write_bytes(erst as *mut u8,0,4096);
+    let link=Trb{parameter:command,status:0,control:TRB_TYPE_LINK|1};
+    core::ptr::write_volatile((command as *mut Trb).add(XHCI_RING_TRBS-1),link);
+    let segment=EventRingSegment{base:event,size:(XHCI_RING_TRBS-1) as u16,reserved:0};
+    core::ptr::write_volatile(erst as *mut EventRingSegment,segment);
+    controller.dcbaa_phys=dcbaa;
+    controller.command_ring_phys=command;
+    controller.event_ring_phys=event;
+    controller.erst_phys=erst;
+    Ok(())
+}
+
+pub unsafe fn start_controller(controller:&mut XhciController,cap:CapabilityRegisters)->Result<(),&'static str>{
+    if controller.mmio_base==0 || controller.dcbaa_phys==0 { return Err("xHCI DMA not configured"); }
+    let op=controller.mmio_base+cap.cap_length as u64;
+    let max_slots=controller.slots.max(1) as u32;
+    write32(op,0x30,max_slots);
+    core::ptr::write_volatile((op+0x18) as *mut u64,controller.command_ring_phys|1);
+    core::ptr::write_volatile((op+0x30) as *mut u64,controller.dcbaa_phys);
+    let rt=controller.mmio_base+cap.rtsoff as u64;
+    let ir0=rt+0x20;
+    core::ptr::write_volatile((ir0+0x08) as *mut u64,controller.erst_phys);
+    core::ptr::write_volatile((ir0+0x10) as *mut u64,controller.event_ring_phys);
+    core::ptr::write_volatile((ir0+0x0c) as *mut u32,1);
+    write32(op,0,read32(op,0)|USBCMD_RUN_STOP);
+    for _ in 0..1_000_000 { if read32(op,4)&USBSTS_HCH==0 { controller.initialized=true; return Ok(()); } core::hint::spin_loop(); }
+    Err("xHCI failed to start")
 }
