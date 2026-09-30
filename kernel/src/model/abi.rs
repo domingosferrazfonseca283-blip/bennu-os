@@ -138,8 +138,8 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
         }
 
         Operation::DeviceSubmit => {
-            let opcode = (call.flags as u32) & 0xffff;
-            let flags = (call.flags as u32) >> 16;
+            let opcode = (call.flags as u32) & 0x00ff;
+            let flags = ((call.flags as u32) >> 8) & 0x00ff;
             let token = call.value;
             match super::runtime::device_submit(
                 cell, call.capability, call.object, opcode, flags,
