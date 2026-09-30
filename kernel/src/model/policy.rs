@@ -4,6 +4,13 @@ use super::ObjectId;
 #[derive(Clone,Copy,PartialEq,Eq)]
 pub enum StoragePolicy { DenyInternal=0, ExplicitOnly=1, Trusted=2 }
 
+const fn matches_storage_trusted(policy: StoragePolicy) -> bool {
+    match policy {
+        StoragePolicy::Trusted => true,
+        _ => false,
+    }
+}
+
 #[repr(C)]
 #[derive(Clone,Copy)]
 pub struct AccessPolicy {
@@ -22,7 +29,7 @@ impl AccessPolicy {
     };
 
     pub const fn permits_internal(&self)->bool {
-        self.allow_internal && self.storage == StoragePolicy::Trusted
+        self.allow_internal && matches_storage_trusted(self.storage)
     }
 
     pub const fn permits_storage(&self, object:ObjectId, removable:bool, is_boot_device:bool)->bool {
