@@ -171,3 +171,14 @@ O Bennu agora possui uma primeira fronteira de chamada nativa x86_64 em int 0x80
 - o vetor é exposto como gate utilizável por código de nível utilizador quando existirem Cells em CPL3.
 
 A implementação atual é deliberadamente pequena. ObjectQuery e EventEmit já possuem caminhos concretos; as restantes operações continuam explícitas como não suportadas até terem semântica e validação completas.
+
+
+## Userspace nativo
+
+A primeira fronteira real de userspace já existe no x86_64. Uma Cell pode possuir uma raiz de Address Space própria, stack de kernel para entradas de privilégio, código e stack marcados como USER e uma entrada Ring 3 construída com `iretq`.
+
+A fronteira de chamada nativa usa `int 0x80`. O número da operação entra em `RAX`, os handles e argumentos entram em registradores Bennu e o dispatcher devolve status/valor no mesmo frame. O yield é uma operação nativa: uma Cell Ring 3 pode devolver o CPU ao scheduler e posteriormente retomar a execução em Ring 3.
+
+O primeiro programa de userspace é deliberadamente mínimo: executa em uma página não gravável, usa uma stack USER não executável e repete a operação de yield. Isso valida a direção completa Ring 3 → syscall → kernel scheduler → Ring 3 sem transformar o userspace em uma extensão privilegiada do kernel.
+
+As páginas de userspace ocupam uma região virtual privada da raiz da Cell. A raiz começa com o espaço de kernel compartilhado estruturalmente, mas as novas tabelas para a região USER são criadas por Cell. A separação avançada continuará a eliminar dependências compartilhadas e a introduzir copy-in/copy-out, reclaim e políticas de mapeamento baseadas em Capability.
