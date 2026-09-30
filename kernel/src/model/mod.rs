@@ -5,7 +5,7 @@ pub mod object;
 pub mod runtime;
 
 pub use capability::{Capability, CapabilityId, CapabilityRights};
-pub use cell::{Cell, CellId, CellState};
+pub use cell::{Cell, CellAction, CellEntry, CellId, CellState};
 pub use event::{Event, EventKind};
 pub use object::{ObjectId, ObjectKind, ResourceObject};
 
