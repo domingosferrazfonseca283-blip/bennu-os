@@ -67,7 +67,7 @@ pub fn init() {
         GDT[7] = tss_high;
 
         let pointer = DescriptorTablePointer {
-            limit: (core::mem::size_of_val(&GDT) - 1) as u16,
+            limit: (core::mem::size_of::<[u64; 8]>() - 1) as u16,
             base: (&raw const GDT) as u64,
         };
 
