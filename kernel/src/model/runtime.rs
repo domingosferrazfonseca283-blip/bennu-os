@@ -118,6 +118,26 @@ pub fn prepare_cell_context(cell: CellId, trampoline: u64) -> Result<(), &'stati
     state.cells[index].attach_address_space_root(root)?;
     state.cells[index].kernel_stack_top = stack.checked_add(crate::memory::PAGE_SIZE).ok_or("cell kernel stack overflow")?;
 
+    crate::memory::paging::map_supervisor_page_in_root(
+        root,
+        stack,
+        stack,
+        true,
+        false,
+    )?;
+
+    let trampoline = trampoline & !(crate::memory::PAGE_SIZE - 1);
+    if trampoline >= 64 * 1024 * 1024 {
+        return Err("cell trampoline is outside bootstrap kernel mapping");
+    }
+    crate::memory::paging::map_supervisor_page_in_root(
+        root,
+        trampoline,
+        trampoline,
+        false,
+        true,
+    )?;
+
     unsafe {
         crate::arch::x86_64::execution::prepare_context(
             &mut state.cells[index].context,
