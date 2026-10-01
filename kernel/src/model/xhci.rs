@@ -137,7 +137,11 @@ pub struct XhciController {
  pub event_dequeue:usize,
  pub event_cycle:bool,
  pub slot_transfer_ring:[u64;XHCI_MAX_SLOTS],
+ pub slot_transfer_enqueue:[u16;XHCI_MAX_SLOTS],
+ pub slot_transfer_cycle:[bool;XHCI_MAX_SLOTS],
  pub endpoint_transfer_ring:[[u64;32];XHCI_MAX_SLOTS],
+ pub endpoint_transfer_enqueue:[[u16;32];XHCI_MAX_SLOTS],
+ pub endpoint_transfer_cycle:[[bool;32];XHCI_MAX_SLOTS],
 }
 impl XhciController {
  pub const EMPTY:Self=Self{
@@ -148,7 +152,11 @@ impl XhciController {
   event_dequeue:0,
   event_cycle:true,
   slot_transfer_ring:[0;XHCI_MAX_SLOTS],
+  slot_transfer_enqueue:[0;XHCI_MAX_SLOTS],
+  slot_transfer_cycle:[true;XHCI_MAX_SLOTS],
   endpoint_transfer_ring:[[0;32];XHCI_MAX_SLOTS],
+  endpoint_transfer_enqueue:[[0;32];XHCI_MAX_SLOTS],
+  endpoint_transfer_cycle:[[true;32];XHCI_MAX_SLOTS],
   ports_state:[XhciPort::empty(0);XHCI_MAX_PORTS],
   capability:CapabilityRegisters{cap_length:0,version:0,hcs_params1:0,hcs_params2:0,hcs_params3:0,hcc_params1:0,dboff:0,rtsoff:0,hcc_params2:0},
  };
@@ -468,13 +476,26 @@ pub fn enqueue_bulk_transfer(
  let key=endpoint_ring_key(endpoint_address);
  let ring=controller.endpoint_transfer_ring[slot as usize][key];
  if ring==0 { return Err("bulk endpoint is not configured"); }
+ let index=controller.endpoint_transfer_enqueue[slot as usize][key] as usize;
+ let cycle=controller.endpoint_transfer_cycle[slot as usize][key];
+ let next=index+1;
+ let next=(if next>=XHCI_RING_TRBS-1 {0}else{next}) as u16;
+ if next as usize==controller.endpoint_transfer_enqueue[slot as usize][key] { return Err("bulk transfer ring full"); }
  unsafe {
-  let trb=normal_trb(buffer,length,endpoint_address&0x80!=0);
-  core::ptr::write_volatile(ring as *mut Trb,trb.with_cycle(true));
-  core::ptr::write_volatile((ring as *mut Trb).add(1),Trb{parameter:ring,status:0,control:TRB_TYPE_LINK|TRB_CYCLE|(1<<1)});
-  ring_doorbell(controller.mmio_base,controller.capability,slot);
+  let trb=normal_trb(buffer,length,endpoint_address&0x80!=0).with_cycle(cycle);
+  core::ptr::write_volatile((ring as *mut Trb).add(index),trb);
+  if index==XHCI_RING_TRBS-2 {
+   let next_cycle=!cycle;
+   core::ptr::write_volatile(
+    (ring as *mut Trb).add(XHCI_RING_TRBS-1),
+    Trb{parameter:ring,status:0,control:TRB_TYPE_LINK|TRB_CYCLE|(1<<1)|if next_cycle {TRB_CYCLE}else{0}},
+   );
+   controller.endpoint_transfer_cycle[slot as usize][key]=next_cycle;
+  }
+  controller.endpoint_transfer_enqueue[slot as usize][key]=next;
+  ring_doorbell(controller.mmio_base,controller.capability,(endpoint_context_index(endpoint_address)) as u8);
  }
- Ok(ring)
+ Ok(ring+(index as u64)*core::mem::size_of::<Trb>() as u64)
 }
 
 pub fn setup_stage_trb(setup:UsbSetupPacket,transfer_type:u32)->Trb {
@@ -572,26 +593,32 @@ pub fn enqueue_control_transfer(
 )->Result<u64,&'static str> {
  if slot==0 || slot as usize>=XHCI_MAX_SLOTS { return Err("invalid xHCI slot"); }
  if controller.mmio_base==0 || controller.event_ring_phys==0 { return Err("xHCI controller is not running"); }
- let ring=if controller.slot_transfer_ring[slot as usize]!=0 { controller.slot_transfer_ring[slot as usize] } else { let r=allocate_dma_page()?; controller.slot_transfer_ring[slot as usize]=r; r };
+ let ring=if controller.slot_transfer_ring[slot as usize]!=0 { controller.slot_transfer_ring[slot as usize] } else {
+  let r=allocate_dma_page()?;
+  controller.slot_transfer_ring[slot as usize]=r;
+  r
+ };
+ let index=controller.slot_transfer_enqueue[slot as usize] as usize;
+ let cycle=controller.slot_transfer_cycle[slot as usize];
+ let (setup_trb,data_trb,status_trb)=control_transfer_trbs(setup,data_buffer,data_length);
+ let count=if data_trb.is_some(){3}else{2};
+ if index+count>=XHCI_RING_TRBS-1 { return Err("EP0 transfer ring requires wrap handling"); }
  unsafe {
-  core::ptr::write_bytes(ring as *mut u8,0,XHCI_PAGE_SIZE as usize);
-  let (setup_trb,data_trb,status_trb)=control_transfer_trbs(setup,data_buffer,data_length);
   let base=ring as *mut Trb;
-  core::ptr::write_volatile(base.add(0),setup_trb.with_cycle(true).with_cycle(true));
+  core::ptr::write_volatile(base.add(index),setup_trb.with_cycle(cycle));
   if let Some(data)=data_trb {
-   core::ptr::write_volatile(base.add(1),data.with_cycle(true));
-   core::ptr::write_volatile(base.add(2),status_trb.with_cycle(true));
+   core::ptr::write_volatile(base.add(index+1),data.with_cycle(cycle));
+   core::ptr::write_volatile(base.add(index+2),status_trb.with_cycle(cycle));
   } else {
-   core::ptr::write_volatile(base.add(1),status_trb.with_cycle(true));
+   core::ptr::write_volatile(base.add(index+1),status_trb.with_cycle(cycle));
   }
-  // A transfer ring is a cyclic structure; the final TRB links back to
-  // the first TRB and toggles the cycle state on wrap.
-  let link_index=if data_trb.is_some(){3}else{2};
+  let next=index+count;
+  controller.slot_transfer_enqueue[slot as usize]=next as u16;
   core::ptr::write_volatile(
    base.add(XHCI_RING_TRBS-1),
    Trb{parameter:ring,status:0,control:TRB_TYPE_LINK|TRB_CYCLE|(1<<1)},
   );
-  ring_doorbell(controller.mmio_base,controller.capability,slot);
+  ring_doorbell(controller.mmio_base,controller.capability,1);
  }
- Ok(ring)
+ Ok(ring+(index+(count-1) as usize) as u64*core::mem::size_of::<Trb>() as u64)
 }
