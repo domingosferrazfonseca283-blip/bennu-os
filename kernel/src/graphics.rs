@@ -14,11 +14,55 @@ pub struct Framebuffer {
 }
 
 impl Framebuffer {
+    fn validate(boot_info: &BootInfo) -> Result<(), &'static str> {
+        if boot_info.framebuffer_addr == 0
+            || boot_info.framebuffer_width == 0
+            || boot_info.framebuffer_height == 0
+            || boot_info.framebuffer_pitch == 0
+            || boot_info.framebuffer_bpp != 32
+        {
+            return Err("no supported framebuffer");
+        }
+
+        let min_pitch = (boot_info.framebuffer_width as u64)
+            .checked_mul(BENNU_FRAMEBUFFER_BYTES_PER_PIXEL as u64)
+            .ok_or("framebuffer pitch overflow")?;
+        if boot_info.framebuffer_pitch as u64 < min_pitch {
+            return Err("framebuffer pitch is too small");
+        }
+
+        if boot_info.framebuffer_red_position >= 32
+            || boot_info.framebuffer_green_position >= 32
+            || boot_info.framebuffer_blue_position >= 32
+            || (boot_info.framebuffer_red_position as u16 + boot_info.framebuffer_red_mask as u16) > 32
+            || (boot_info.framebuffer_green_position as u16 + boot_info.framebuffer_green_mask as u16) > 32
+            || (boot_info.framebuffer_blue_position as u16 + boot_info.framebuffer_blue_mask as u16) > 32
+        {
+            return Err("invalid framebuffer channel layout");
+        }
+
+        Ok(())
+    }
+
     pub unsafe fn from_boot_info(boot_info: &BootInfo) -> Result<Self, &'static str> {
-        if boot_info.framebuffer_addr == 0 || boot_info.framebuffer_width == 0 || boot_info.framebuffer_height == 0 || boot_info.framebuffer_pitch == 0 || boot_info.framebuffer_bpp != 32 { return Err("no supported framebuffer"); }
-        let bytes = (boot_info.framebuffer_pitch as u64).checked_mul(boot_info.framebuffer_height as u64).ok_or("framebuffer size overflow")?;
+        Self::validate(boot_info)?;
+        let bytes = (boot_info.framebuffer_pitch as u64)
+            .checked_mul(boot_info.framebuffer_height as u64)
+            .ok_or("framebuffer size overflow")?;
         let base = crate::memory::paging::map_mmio(boot_info.framebuffer_addr, bytes)? as *mut u32;
-        Ok(Self { base, width: boot_info.framebuffer_width as usize, height: boot_info.framebuffer_height as usize, pitch_pixels: boot_info.framebuffer_pitch as usize / 4, red_mask: boot_info.framebuffer_red_mask, red_shift: boot_info.framebuffer_red_position, green_mask: boot_info.framebuffer_green_mask, green_shift: boot_info.framebuffer_green_position, blue_mask: boot_info.framebuffer_blue_mask, blue_shift: boot_info.framebuffer_blue_position })
+
+        Ok(Self {
+            base,
+            width: boot_info.framebuffer_width as usize,
+            height: boot_info.framebuffer_height as usize,
+            pitch_pixels: boot_info.framebuffer_pitch as usize / BENNU_FRAMEBUFFER_BYTES_PER_PIXEL as usize,
+            red_mask: boot_info.framebuffer_red_mask,
+            red_shift: boot_info.framebuffer_red_position,
+            green_mask: boot_info.framebuffer_green_mask,
+            green_shift: boot_info.framebuffer_green_position,
+            blue_mask: boot_info.framebuffer_blue_mask,
+            blue_shift: boot_info.framebuffer_blue_position,
+        })
     }
 
     fn pixel(&self, red: u8, green: u8, blue: u8) -> u32 {
@@ -28,8 +72,25 @@ impl Framebuffer {
         r | g | b
     }
 
-    pub unsafe fn clear(&self, pixel: u32) { for y in 0..self.height { let row=self.base.add(y*self.pitch_pixels); for x in 0..self.width { core::ptr::write_volatile(row.add(x),pixel); } } }
-    pub unsafe fn fill_rect(&self, x:usize, y:usize, width:usize, height:usize, pixel:u32) { let x2=core::cmp::min(x.saturating_add(width),self.width); let y2=core::cmp::min(y.saturating_add(height),self.height); for yy in y..y2 { let row=self.base.add(yy*self.pitch_pixels); for xx in x..x2 { core::ptr::write_volatile(row.add(xx),pixel); } } }
+    pub unsafe fn clear(&self, pixel: u32) {
+        for y in 0..self.height {
+            let row = self.base.add(y * self.pitch_pixels);
+            for x in 0..self.width {
+                core::ptr::write_volatile(row.add(x), pixel);
+            }
+        }
+    }
+
+    pub unsafe fn fill_rect(&self, x: usize, y: usize, width: usize, height: usize, pixel: u32) {
+        let x2 = core::cmp::min(x.saturating_add(width), self.width);
+        let y2 = core::cmp::min(y.saturating_add(height), self.height);
+        for yy in y..y2 {
+            let row = self.base.add(yy * self.pitch_pixels);
+            for xx in x..x2 {
+                core::ptr::write_volatile(row.add(xx), pixel);
+            }
+        }
+    }
 }
 
 fn glyph(byte: u8, row: usize) -> u8 {
@@ -77,53 +138,29 @@ impl Framebuffer {
 }
 
 pub fn init(boot_info: &BootInfo) -> Result<(), &'static str> {
-    if boot_info.framebuffer_addr == 0
-        || boot_info.framebuffer_width == 0
-        || boot_info.framebuffer_height == 0
-        || boot_info.framebuffer_pitch == 0
-        || boot_info.framebuffer_bpp != 32
-    {
-        return Err("no supported framebuffer");
-    }
-
-    let bytes = (boot_info.framebuffer_pitch as u64)
-        .checked_mul(boot_info.framebuffer_height as u64)
-        .ok_or("framebuffer size overflow")?;
-    let framebuffer = crate::memory::paging::map_mmio(boot_info.framebuffer_addr, bytes)? as *mut u32;
-    let pitch_pixels = boot_info.framebuffer_pitch as usize / BENNU_FRAMEBUFFER_BYTES_PER_PIXEL as usize;
-    let width = boot_info.framebuffer_width as usize;
-    let height = boot_info.framebuffer_height as usize;
+    let framebuffer = unsafe { Framebuffer::from_boot_info(boot_info)? };
+    let dark_a = framebuffer.pixel(16, 24, 40);
+    let dark_b = framebuffer.pixel(32, 48, 72);
+    let black = framebuffer.pixel(0, 0, 0);
 
     unsafe {
-        for y in 0..height {
-            let row = framebuffer.add(y * pitch_pixels);
-            for x in 0..width {
+        for y in 0..framebuffer.height {
+            let row = framebuffer.base.add(y * framebuffer.pitch_pixels);
+            for x in 0..framebuffer.width {
                 let band = ((x / 64) + (y / 64)) & 1;
-                let pixel = if band == 0 { 0x00101828 } else { 0x00203048 };
-                core::ptr::write_volatile(row.add(x), pixel);
+                core::ptr::write_volatile(row.add(x), if band == 0 { dark_a } else { dark_b });
             }
         }
 
-        let bar_height = core::cmp::min(72, height);
-        for y in 0..bar_height {
-            let row = framebuffer.add(y * pitch_pixels);
-            for x in 0..width {
-                core::ptr::write_volatile(row.add(x), 0x00000000);
-            }
-        }
+        let bar_height = core::cmp::min(72, framebuffer.height);
+        framebuffer.fill_rect(0, 0, framebuffer.width, bar_height, black);
 
-        let fb = Framebuffer {
-            base: framebuffer, width, height, pitch_pixels,
-            red_mask: boot_info.framebuffer_red_mask, red_shift: boot_info.framebuffer_red_position,
-            green_mask: boot_info.framebuffer_green_mask, green_shift: boot_info.framebuffer_green_position,
-            blue_mask: boot_info.framebuffer_blue_mask, blue_shift: boot_info.framebuffer_blue_position,
-        };
-        let white = fb.pixel(255, 255, 255);
-        let accent = fb.pixel(64, 160, 255);
-        let text = fb.pixel(160, 216, 255);
-        fb.text(24, 20, b"BENNU OS", 2, white);
-        fb.fill_rect(24, 112, core::cmp::min(360, width.saturating_sub(48)), 2, accent);
-        fb.text(24, 136, b"VIDEO ONLINE", 2, text);
+        let white = framebuffer.pixel(255, 255, 255);
+        let accent = framebuffer.pixel(64, 160, 255);
+        let text = framebuffer.pixel(160, 216, 255);
+        framebuffer.text(24, 20, b"BENNU OS", 2, white);
+        framebuffer.fill_rect(24, 112, core::cmp::min(360, framebuffer.width.saturating_sub(48)), 2, accent);
+        framebuffer.text(24, 136, b"VIDEO ONLINE", 2, text);
     }
 
     Ok(())
