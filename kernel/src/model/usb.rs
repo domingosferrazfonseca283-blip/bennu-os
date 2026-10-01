@@ -94,6 +94,7 @@ pub enum UsbMassStorageStage { Idle=0, Command=1, Data=2, Status=3, Failed=4 }
 #[repr(C)]
 #[derive(Clone,Copy)]
 pub struct UsbMassStorageTransport {
+
  pub interface_number:u8,
  pub bulk_in:u8,
  pub bulk_out:u8,
@@ -113,6 +114,26 @@ impl UsbMassStorageTransport {
  pub fn next_tag(&mut self)->u32 { self.tag=self.tag.wrapping_add(1).max(1); self.tag }
 }
 
+impl UsbMassStorageTransport {
+ pub fn prepare_cbw(&mut self,command:super::ScsiCommand)->UsbMassStorageBotCbw {
+  let tag=self.next_tag();
+  let mut length=0u32;
+  let in_direction=match command.bytes[0] {
+   0x12|0x25=>true,
+   0x28=>true,
+   0x2a=>false,
+   _=>false,
+  };
+  if command.bytes[0]==0x12 { length=command.bytes[4] as u32; }
+  if command.bytes[0]==0x25 { length=8; }
+  if command.bytes[0]==0x28 || command.bytes[0]==0x2a {
+   let blocks=((command.bytes[7] as u32)<<8)|(command.bytes[8] as u32);
+   length=blocks.saturating_mul(self.block_size);
+  }
+  self.stage=UsbMassStorageStage::Command;
+  UsbMassStorageBotCbw::new(tag,length,in_direction,0,command.length,command.bytes)
+ }
+}
 pub const USB_MAX_INTERFACES:usize=32;
 pub const USB_MAX_ENDPOINTS:usize=64;
 
