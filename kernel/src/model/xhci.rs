@@ -573,7 +573,7 @@ pub fn prepare_address_device_context(
 
 pub fn enqueue_address_device_for_port(controller:&mut XhciController,slot:u8,port:u8)->Result<u64,&'static str> {
  if port==0 || port as usize>controller.ports as usize { return Err("invalid xHCI root port"); }
- let speed=(controller.ports_state[(port-1) as usize].status & PORTSC_SPEED_MASK) as u8;
+ let speed=((controller.ports_state[(port-1) as usize].status & PORTSC_SPEED_MASK)>>PORTSC_SPEED_SHIFT) as u8;
  if speed==0 { return Err("USB port speed unavailable"); }
  let (input,_device)=prepare_address_device_context(controller,slot,port,speed)?;
  enqueue_address_device(controller,input,slot)
