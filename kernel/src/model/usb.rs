@@ -75,7 +75,7 @@ pub struct UsbEndpointDescriptor {
  pub interval:u8,
 }
 impl UsbEndpointDescriptor {
- pub const EMPTY:Self=Self{address:0,attributes:0,max_packet:0,interval:0};
+ pub const EMPTY:Self=Self{address:0,attributes:0,max_packet:0,interval:0,interface_number:0};
  pub const fn transfer_kind(&self)->TransferKind {
   match self.attributes & 0x03 {
    1=>TransferKind::Isochronous,
@@ -85,6 +85,32 @@ impl UsbEndpointDescriptor {
   }
  }
  pub const fn is_in(&self)->bool { self.address & 0x80 != 0 }
+}
+
+#[repr(u8)]
+#[derive(Clone,Copy,PartialEq,Eq)]
+pub enum UsbMassStorageStage { Idle=0, Command=1, Data=2, Status=3, Failed=4 }
+
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct UsbMassStorageTransport {
+ pub interface_number:u8,
+ pub bulk_in:u8,
+ pub bulk_out:u8,
+ pub max_packet_in:u16,
+ pub max_packet_out:u16,
+ pub tag:u32,
+ pub stage:UsbMassStorageStage,
+ pub block_size:u32,
+ pub block_count:u64,
+}
+impl UsbMassStorageTransport {
+ pub const EMPTY:Self=Self{
+  interface_number:0,bulk_in:0,bulk_out:0,max_packet_in:0,max_packet_out:0,
+  tag:0,stage:UsbMassStorageStage::Idle,block_size:0,block_count:0,
+ };
+ pub const fn valid(&self)->bool { self.bulk_in!=0 && self.bulk_out!=0 && self.max_packet_in!=0 && self.max_packet_out!=0 }
+ pub fn next_tag(&mut self)->u32 { self.tag=self.tag.wrapping_add(1).max(1); self.tag }
 }
 
 pub const USB_MAX_INTERFACES:usize=32;
@@ -115,6 +141,29 @@ impl UsbDeviceTopology {
   for i in 0..self.interface_count as usize { if self.interfaces[i].is_mass_storage(){return Some(self.interfaces[i]);} }
   None
  }
+ pub fn mass_storage_transport(&self)->UsbMassStorageTransport {
+  let interface=match self.mass_storage_interface(){Some(v)=>v,None=>return UsbMassStorageTransport::EMPTY};
+  let mut out=UsbMassStorageTransport::EMPTY;
+  out.interface_number=interface.number;
+  for i in 0..self.endpoint_count as usize {
+   let ep=self.endpoints[i];
+   if ep.interface_number!=interface.number || ep.transfer_kind()!=TransferKind::Bulk { continue; }
+   if ep.is_in() && out.bulk_in==0 { out.bulk_in=ep.address; out.max_packet_in=ep.max_packet; }
+   if !ep.is_in() && out.bulk_out==0 { out.bulk_out=ep.address; out.max_packet_out=ep.max_packet; }
+  }
+  out
+ }
+}
+
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub const USB_BOT_CBW_LENGTH:usize=31;
+pub const USB_BOT_CSW_LENGTH:usize=13;
+
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct UsbMassStorageEndpoints {
+ pub bulk_in:u8,pub bulk_out:u8,pub max_packet_in:u16,pub max_packet_out:u16,
 }
 
 #[repr(C)]
