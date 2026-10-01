@@ -223,6 +223,36 @@ impl DeviceFabric {
  }
 
  
+ pub fn submit_block_request(&mut self,request:&super::BlockRequest)->Result<(),&'static str> {
+  let mut device=ObjectId::NULL;
+  for i in 0..MAX_DEVICES {
+   if self.mass_storage[i].block_object==request.device && !request.device.is_null() {
+    device=self.usb_devices[i].object;
+    break;
+   }
+  }
+  if device.is_null() { return Err("block device is not bound to USB mass storage"); }
+  let mut geometry=None;
+  for i in 0..MAX_DEVICES {
+   if self.usb_devices[i].object==device {
+    geometry=Some(self.mass_storage[i]);
+    break;
+   }
+  }
+  let transport=geometry.ok_or("mass-storage transport missing")?;
+  if transport.block_size==0 || request.blocks==0 { return Err("invalid block geometry"); }
+  let bytes=(request.blocks as u64).checked_mul(transport.block_size as u64).ok_or("block request size overflow")?;
+  if bytes==0 || bytes>super::xhci::XHCI_PAGE_SIZE { return Err("block request exceeds single DMA page"); }
+  let end=request.lba.checked_add(request.blocks as u64).ok_or("block range overflow")?;
+  if end>transport.block_count { return Err("block range outside device"); }
+  let command=match request.operation {
+   super::BlockOp::Read => super::ScsiCommand::read10(request.lba as u32,request.blocks as u16),
+   super::BlockOp::Write => super::ScsiCommand::write10(request.lba as u32,request.blocks as u16),
+   super::BlockOp::Flush => return Err("USB mass storage flush not implemented"),
+  };
+  self.submit_bot_cbw(device,request.token,request.owner_cell,command,request.buffer,bytes)
+ }
+
  pub fn mass_storage_geometry(&self,device:ObjectId)->Option<(u32,u64,ObjectId)> {
   for i in 0..MAX_DEVICES {
    if self.usb_devices[i].object==device && self.mass_storage[i].block_size!=0 && self.mass_storage[i].block_count!=0 {
