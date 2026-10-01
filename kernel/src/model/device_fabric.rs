@@ -7,8 +7,8 @@ pub const MAX_PENDING_TRANSFERS:usize=64;
 
 #[repr(C)]
 #[derive(Clone,Copy)]
-pub struct PendingTransfer { pub valid:bool,pub device:ObjectId,pub token:u64,pub slot:u8,pub ring:u64,pub completion_trb:u64,pub owner_cell:u64,pub user_buffer:u64,pub dma_buffer:u64,pub length:u64,pub operation:u8,pub phase:u8,pub endpoint:u8 }
-impl PendingTransfer { pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,slot:0,ring:0,completion_trb:0,owner_cell:0,user_buffer:0,dma_buffer:0,length:0,operation:0,phase:0,endpoint:0}; }
+pub struct PendingTransfer { pub valid:bool,pub device:ObjectId,pub token:u64,pub slot:u8,pub ring:u64,pub completion_trb:u64,pub owner_cell:u64,pub user_buffer:u64,pub dma_buffer:u64,pub length:u64,pub operation:u8,pub phase:u8,pub endpoint:u8,pub bot_tag:u32,pub bot_transfer_length:u32,pub bot_direction_in:bool,pub bot_command:u8 }
+impl PendingTransfer { pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,slot:0,ring:0,completion_trb:0,owner_cell:0,user_buffer:0,dma_buffer:0,length:0,operation:0,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0}; }
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -131,13 +131,13 @@ impl DeviceFabric {
   }
   Err("USB device object not found")
  }
- fn submit_bot_cbw(&mut self,device:ObjectId,token:u64,owner_cell:u64,command:super::ScsiCommand)->Result<(),&'static str> {
+ fn submit_bot_cbw(&mut self,device:ObjectId,token:u64,owner_cell:u64,command:super::ScsiCommand,user_buffer:u64,user_length:u64)->Result<(),&'static str> {
   let mut target=None;
   for i in 0..MAX_DEVICES { if self.usb_devices[i].object==device { target=Some(i); break; } }
   let i=target.ok_or("USB mass-storage device not found")?;
   let transport=self.mass_storage[i];
   if !transport.valid() { return Err("mass-storage transport not ready"); }
-  let cbw= self.mass_storage[i].prepare_cbw(command);
+  let cbw=self.mass_storage[i].prepare_cbw(command);
   let dma=super::xhci::allocate_dma_page()?;
   unsafe { core::ptr::write_bytes(dma as *mut u8,0,super::xhci::XHCI_PAGE_SIZE as usize); }
   let mut bytes=[0u8;super::usb::USB_BOT_CBW_LENGTH];
@@ -149,11 +149,79 @@ impl DeviceFabric {
    if self.controllers[c].object!=controller { continue; }
    let ring=super::xhci::enqueue_bulk_transfer(&mut self.controllers[c],slot,transport.bulk_out,dma,super::usb::USB_BOT_CBW_LENGTH as u32)?;
    let p=(0..MAX_PENDING_TRANSFERS).find(|x| !self.transfers[*x].valid).ok_or("BOT transfer tracking full")?;
-   self.transfers[p]=PendingTransfer{valid:true,device,token,slot,ring,completion_trb:ring,owner_cell,user_buffer:0,dma_buffer:dma,length:super::usb::USB_BOT_CBW_LENGTH as u64,operation:9,phase:1,endpoint:transport.bulk_out};
+   self.transfers[p]=PendingTransfer{
+    valid:true,device,token,slot,ring,completion_trb:ring,owner_cell,
+    user_buffer,dma_buffer:dma,length:super::usb::USB_BOT_CBW_LENGTH as u64,
+    operation:9,phase:1,endpoint:transport.bulk_out,bot_tag:cbw.tag,
+    bot_transfer_length:cbw.transfer_length.min(super::xhci::XHCI_PAGE_SIZE as u32),
+    bot_direction_in:cbw.flags&0x80!=0,bot_command:command.bytes[0],
+   };
    return Ok(());
   }
   Err("mass-storage controller unavailable")
  }
+
+ fn queue_bot_csw(&mut self,t:PendingTransfer)->Result<(),&'static str> {
+  let mut index=None;
+  for i in 0..MAX_DEVICES { if self.usb_devices[i].object==t.device { index=Some(i); break; } }
+  let i=index.ok_or("BOT device disappeared")?;
+  let dma=super::xhci::allocate_dma_page()?;
+  unsafe { core::ptr::write_bytes(dma as *mut u8,0,super::xhci::XHCI_PAGE_SIZE as usize); }
+  let controller=self.usb_devices[i].controller;
+  let slot=self.usb_devices[i].slot;
+  let ep=self.mass_storage[i].bulk_in;
+  for c in 0..self.controller_count {
+   if self.controllers[c].object!=controller { continue; }
+   let ring=super::xhci::enqueue_bulk_transfer(&mut self.controllers[c],slot,ep,dma,super::usb::USB_BOT_CSW_LENGTH as u32)?;
+   let p=(0..MAX_PENDING_TRANSFERS).find(|x| !self.transfers[*x].valid).ok_or("BOT CSW tracking full")?;
+   let mut next=t;
+   next.ring=ring; next.completion_trb=ring; next.dma_buffer=dma;
+   next.length=super::usb::USB_BOT_CSW_LENGTH as u64; next.operation=11; next.phase=3; next.endpoint=ep;
+   self.transfers[p]=next;
+   return Ok(());
+  }
+  Err("mass-storage controller unavailable")
+ }
+
+ fn queue_bot_data(&mut self,t:PendingTransfer)->Result<(),&'static str> {
+  let mut index=None;
+  for i in 0..MAX_DEVICES { if self.usb_devices[i].object==t.device { index=Some(i); break; } }
+  let i=index.ok_or("BOT device disappeared")?;
+  let dma=super::xhci::allocate_dma_page()?;
+  unsafe { core::ptr::write_bytes(dma as *mut u8,0,super::xhci::XHCI_PAGE_SIZE as usize); }
+  if !t.bot_direction_in {
+   if t.user_buffer==0 { return Err("BOT OUT transfer requires user buffer"); }
+   let root=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell)).ok_or("owner Cell address space missing")?;
+   crate::memory::user::copy_from_user(root,dma as *mut u8,t.user_buffer,t.bot_transfer_length as u64)?;
+  }
+  let controller=self.usb_devices[i].controller;
+  let slot=self.usb_devices[i].slot;
+  let ep=if t.bot_direction_in { self.mass_storage[i].bulk_in } else { self.mass_storage[i].bulk_out };
+  for c in 0..self.controller_count {
+   if self.controllers[c].object!=controller { continue; }
+   let ring=super::xhci::enqueue_bulk_transfer(&mut self.controllers[c],slot,ep,dma,t.bot_transfer_length)?;
+   let p=(0..MAX_PENDING_TRANSFERS).find(|x| !self.transfers[*x].valid).ok_or("BOT data tracking full")?;
+   let mut next=t;
+   next.ring=ring; next.completion_trb=ring; next.dma_buffer=dma; next.length=t.bot_transfer_length as u64;
+   next.operation=10; next.phase=2; next.endpoint=ep;
+   self.transfers[p]=next;
+   return Ok(());
+  }
+  Err("mass-storage controller unavailable")
+ }
+
+ fn start_mass_storage_probe(&mut self,device:ObjectId,token:u64,owner_cell:u64)->Result<(),&'static str> {
+  for i in 0..MAX_DEVICES {
+   if self.usb_devices[i].object==device {
+    if !self.mass_storage[i].valid() { return Err("mass-storage endpoints unavailable"); }
+    if self.mass_storage[i].stage!=super::UsbMassStorageStage::Idle { return Ok(()); }
+    self.mass_storage[i].stage=super::UsbMassStorageStage::Command;
+    return self.submit_bot_cbw(device,token,owner_cell,super::ScsiCommand::inquiry(36),0,36);
+   }
+  }
+  Err("mass-storage device not found")
+ }
+
  
  pub fn configure_mass_storage_endpoints(&mut self,device:ObjectId,token:u64,owner_cell:u64)->Result<usize,&'static str> {
   for i in 0..MAX_DEVICES {
