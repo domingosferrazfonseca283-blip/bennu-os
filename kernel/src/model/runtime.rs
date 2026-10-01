@@ -44,6 +44,55 @@ pub fn register_xhci_controller(controller: super::XhciController) -> Result<(),
     DEVICE_FABRIC.lock().get_mut().register_xhci(controller)
 }
 
+pub fn service_block_io() {
+    let envelope = match super::io_fabric::begin_next() { Some(v) => v, None => return };
+    let mut device = super::BlockDevice::EMPTY;
+    {
+        let guard = RUNTIME.lock();
+        let state = guard.get();
+        for i in 0..super::storage::MAX_BLOCK_DEVICES {
+            if state.block_devices[i].object == envelope.request.device {
+                device = state.block_devices[i];
+                break;
+            }
+        }
+    }
+    if device.object.is_null() {
+        let _ = emit(super::Event::new(
+            super::EventKind::DeviceTransferCompleted,
+            envelope.request.device,
+            super::ObjectId::NULL,
+            ((super::IoStatus::NoDevice as u64) << 56) | (envelope.request.token & 0x00ff_ffff_ffff_ffff),
+        ));
+        return;
+    }
+    if !device.is_usb_storage() {
+        let _ = emit(super::Event::new(
+            super::EventKind::DeviceTransferCompleted,
+            envelope.request.device,
+            super::ObjectId::NULL,
+            ((super::IoStatus::Invalid as u64) << 56) | (envelope.request.token & 0x00ff_ffff_ffff_ffff),
+        ));
+        return;
+    }
+    let result = DEVICE_FABRIC.lock().get_mut().submit_block_request(&envelope.request);
+    if result.is_err() {
+        let _ = emit(super::Event::new(
+            super::EventKind::DeviceTransferCompleted,
+            envelope.request.device,
+            super::ObjectId::NULL,
+            ((super::IoStatus::Hardware as u64) << 56) | (envelope.request.token & 0x00ff_ffff_ffff_ffff),
+        ));
+    } else {
+        let _ = emit(super::Event::new(
+            super::EventKind::DeviceQueued,
+            envelope.request.device,
+            super::ObjectId::NULL,
+            envelope.request.token,
+        ));
+    }
+}
+
 pub fn service_device_io() {
     let request = match super::io_fabric::begin_device() { Some(r) => r, None => return };
     let result = DEVICE_FABRIC.lock().get_mut().submit(&request);
