@@ -44,7 +44,7 @@ start2:
     mov dword [BOOT_INFO + 0], 0x554F5301
     mov dword [BOOT_INFO + 4], 0x42454E4E
     mov dword [BOOT_INFO + 8], 1
-    mov dword [BOOT_INFO + 12], 80
+    mov dword [BOOT_INFO + 12], 88
     mov byte  [BOOT_INFO + 16], dl
 
     mov dword [BOOT_INFO + 24], KERNEL_LOAD
@@ -287,6 +287,19 @@ setup_vbe:
     mov [BOOT_INFO + 72], eax
     movzx eax, byte [VBE_MODE_INFO + 25]
     mov [BOOT_INFO + 76], eax
+    mov al, [VBE_MODE_INFO + 31]
+    mov [BOOT_INFO + 80], al
+    mov al, [VBE_MODE_INFO + 32]
+    mov [BOOT_INFO + 81], al
+    mov al, [VBE_MODE_INFO + 29]
+    mov [BOOT_INFO + 82], al
+    mov [BOOT_INFO + 83], byte 8
+    mov al, [VBE_MODE_INFO + 28]
+    mov [BOOT_INFO + 84], al
+    mov [BOOT_INFO + 85], byte 8
+    mov al, [VBE_MODE_INFO + 27]
+    mov [BOOT_INFO + 86], al
+    mov [BOOT_INFO + 87], byte 8
 .done:
     pop es
     pop ds
