@@ -246,6 +246,42 @@ pub fn translate_user_address(root: u64, virtual_address: u64, write: bool) -> O
     }
 }
 
+
+/// Validate that a user buffer is fully mapped in a Cell address space.
+///
+/// This is used at privileged boundaries before the kernel or a DMA-capable
+/// device is allowed to consume a user-provided buffer.
+pub fn validate_user_buffer(
+    root: u64,
+    base: u64,
+    length: u64,
+    write: bool,
+) -> bool {
+    if length == 0 || base >= 0x0000_8000_0000_0000 {
+        return false;
+    }
+    let end = match base.checked_add(length - 1) {
+        Some(end) if end < 0x0000_8000_0000_0000 => end,
+        _ => return false,
+    };
+
+    let first_page = base & !(PAGE_SIZE - 1);
+    let last_page = end & !(PAGE_SIZE - 1);
+    let mut page = first_page;
+    loop {
+        if translate_user_address(root, page, write).is_none() {
+            return false;
+        }
+        if page == last_page {
+            return true;
+        }
+        page = match page.checked_add(PAGE_SIZE) {
+            Some(next) => next,
+            None => return false,
+        };
+    }
+}
+
 pub fn map_page(virtual_address: u64, physical_frame: u64) -> Result<(), &'static str> {
     if virtual_address & (PAGE_SIZE - 1) != 0
         || physical_frame & (PAGE_SIZE - 1) != 0
