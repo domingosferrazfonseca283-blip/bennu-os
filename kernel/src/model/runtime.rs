@@ -62,6 +62,10 @@ pub fn service_device_events() {
                     }
                 }
             }
+        } else if operation == 5 && completion_code == 1 {
+            let _ = DEVICE_FABRIC.lock().get_mut().configure_mass_storage_endpoints(
+                device, token, owner_cell
+            );
         }
         let kind = if operation == 2 {
             super::EventKind::DeviceTransferCompleted
