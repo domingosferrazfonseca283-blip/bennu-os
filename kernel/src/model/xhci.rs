@@ -97,11 +97,12 @@ impl XhciRing {
  pub const EMPTY:Self=Self{trbs:[Trb::EMPTY;XHCI_RING_TRBS],enqueue:0,dequeue:0,cycle:true};
  pub fn reset(&mut self){*self=Self::EMPTY;}
  pub fn push_with_index(&mut self,trb:Trb)->Result<usize,&'static str>{
-  if self.enqueue==XHCI_RING_TRBS-1 { self.enqueue=0; self.cycle=!self.cycle; }
-  let next=(self.enqueue+1)%(XHCI_RING_TRBS-1);
+  let capacity=XHCI_RING_TRBS-1;
+  let next=(self.enqueue+1)%capacity;
   if next==self.dequeue{return Err("xHCI ring full");}
   let index=self.enqueue;
   self.trbs[index]=trb.with_cycle(self.cycle);
+  if next==0 { self.cycle=!self.cycle; }
   self.enqueue=next;
   Ok(index)
  }
@@ -271,7 +272,7 @@ pub unsafe fn setup_dma(controller:&mut XhciController)->Result<(),&'static str>
     core::ptr::write_bytes(erst as *mut u8,0,4096);
     let link=Trb{parameter:command,status:0,control:TRB_TYPE_LINK|0x3};
     core::ptr::write_volatile((command as *mut Trb).add(XHCI_RING_TRBS-1),link);
-    let segment=EventRingSegment{base:event,size:(XHCI_RING_TRBS-1) as u16,reserved:0};
+    let segment=EventRingSegment{base:event,size:XHCI_RING_TRBS as u16,reserved:0};
     core::ptr::write_volatile(erst as *mut EventRingSegment,segment);
     controller.dcbaa_phys=dcbaa;
     controller.command_ring_phys=command;
@@ -327,10 +328,10 @@ pub unsafe fn poll_event(controller:&mut XhciController)->Option<XhciEvent> {
  if controller.event_ring_phys==0 || controller.mmio_base==0 { return controller.event_ring.pop().map(|trb|XhciEvent{trb}); }
  let trb_ptr=(controller.event_ring_phys as *const Trb).add(controller.event_dequeue);
  let trb=core::ptr::read_volatile(trb_ptr);
- let cycle=trb.control & 1 != 0;
+ let cycle=trb.control & TRB_CYCLE != 0;
  if cycle != controller.event_cycle { return None; }
  controller.event_dequeue += 1;
- if controller.event_dequeue >= XHCI_RING_TRBS-1 {
+ if controller.event_dequeue >= XHCI_RING_TRBS {
   controller.event_dequeue=0;
   controller.event_cycle=!controller.event_cycle;
  }
@@ -506,7 +507,7 @@ pub fn setup_stage_trb(setup:UsbSetupPacket,transfer_type:u32)->Trb {
   |((setup.value as u64)<<16)
   |((setup.index as u64)<<32)
   |((setup.length as u64)<<48);
- Trb{parameter:packed,status:0,control:TRB_TYPE_SETUP_STAGE|transfer_type}
+ Trb{parameter:packed,status:0,control:TRB_TYPE_SETUP_STAGE|transfer_type|TRB_CHAIN}
 }
 
 
@@ -589,7 +590,7 @@ pub fn control_transfer_trbs(
  let setup_trb=setup_stage_trb(setup,transfer_type | TRB_IDT);
  if data_length==0 { return (setup_trb,None,status_stage_trb(true)); }
  let data_in=setup.request_type & 0x80 != 0;
- (setup_trb,Some(data_stage_trb(data_buffer,data_length as u32,data_in,false)),status_stage_trb(!data_in))
+ (setup_trb,Some(data_stage_trb(data_buffer,data_length as u32,data_in,true)),status_stage_trb(!data_in))
 }
 
 
