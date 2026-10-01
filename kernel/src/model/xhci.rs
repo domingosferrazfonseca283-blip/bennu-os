@@ -581,8 +581,8 @@ pub fn enqueue_address_device_for_port(controller:&mut XhciController,slot:u8,po
 
 
 pub fn data_stage_trb(buffer:u64,length:u32,in_direction:bool,chain:bool)->Trb {
- let mut control=TRB_TYPE_DATA_STAGE | if in_direction { TRB_DIR_IN } else { 0 } | TRB_IOC;
- if chain { control|=TRB_CHAIN; }
+ let mut control=TRB_TYPE_DATA_STAGE | if in_direction { TRB_DIR_IN } else { 0 };
+ if chain { control|=TRB_CHAIN; } else { control|=TRB_IOC; }
  Trb{parameter:buffer,status:length & 0x1ffff,control}
 }
 
