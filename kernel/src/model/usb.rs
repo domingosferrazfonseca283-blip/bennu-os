@@ -73,6 +73,7 @@ pub struct UsbEndpointDescriptor {
  pub attributes:u8,
  pub max_packet:u16,
  pub interval:u8,
+ pub interface_number:u8,
 }
 impl UsbEndpointDescriptor {
  pub const EMPTY:Self=Self{address:0,attributes:0,max_packet:0,interval:0,interface_number:0};
