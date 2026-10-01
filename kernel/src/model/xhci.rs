@@ -611,11 +611,24 @@ pub fn enqueue_control_transfer(
   controller.slot_transfer_ring[slot as usize]=r;
   r
  };
- let index=controller.slot_transfer_enqueue[slot as usize] as usize;
- let cycle=controller.slot_transfer_cycle[slot as usize];
+ let mut index=controller.slot_transfer_enqueue[slot as usize] as usize;
+ let mut cycle=controller.slot_transfer_cycle[slot as usize];
  let (setup_trb,data_trb,status_trb)=control_transfer_trbs(setup,data_buffer,data_length);
  let count=if data_trb.is_some(){3}else{2};
- if index+count>=XHCI_RING_TRBS-1 { return Err("EP0 transfer ring requires wrap handling"); }
+ let capacity=XHCI_RING_TRBS-1;
+ if count>=capacity { return Err("EP0 control transfer is too large for ring"); }
+ if index+count>capacity {
+  unsafe {
+   let base=ring as *mut Trb;
+   // The Link TRB itself is consumed with the producer's current cycle.
+   core::ptr::write_volatile(
+    base.add(capacity),
+    Trb{parameter:ring,status:0,control:TRB_TYPE_LINK|if cycle {TRB_CYCLE}else{0}|(1<<1)},
+   );
+  }
+  index=0;
+  cycle=!cycle;
+ }
  unsafe {
   let base=ring as *mut Trb;
   core::ptr::write_volatile(base.add(index),setup_trb.with_cycle(cycle));
@@ -627,11 +640,12 @@ pub fn enqueue_control_transfer(
   }
   let next=index+count;
   controller.slot_transfer_enqueue[slot as usize]=next as u16;
+  controller.slot_transfer_cycle[slot as usize]=cycle;
   core::ptr::write_volatile(
-   base.add(XHCI_RING_TRBS-1),
-   Trb{parameter:ring,status:0,control:TRB_TYPE_LINK|TRB_CYCLE|(1<<1)},
+   base.add(capacity),
+   Trb{parameter:ring,status:0,control:TRB_TYPE_LINK|if cycle {TRB_CYCLE}else{0}|(1<<1)},
   );
   ring_doorbell(controller.mmio_base,controller.capability,1);
  }
- Ok(ring+(index+(count-1) as usize) as u64*core::mem::size_of::<Trb>() as u64)
+ Ok(ring+(index+(count-1)) as u64*core::mem::size_of::<Trb>() as u64)
 }
