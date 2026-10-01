@@ -6,6 +6,8 @@ pub const BENNU_BOOT_VERSION: u32 = 1;
 pub const BENNU_E820_USABLE: u32 = 1;
 pub const BENNU_E820_MAX_ENTRIES: usize = 128;
 pub const BENNU_FRAMEBUFFER_BYTES_PER_PIXEL: u32 = 4;
+pub const BENNU_BOOT_PROTOCOL_BIOS_VBE: u8 = 1;
+pub const BENNU_BOOT_PROTOCOL_UEFI_GOP: u8 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -22,7 +24,8 @@ pub struct BootInfo {
     pub version: u32,
     pub size: u32,
     pub boot_drive: u8,
-    pub reserved: [u8; 7],
+    pub boot_protocol: u8,
+    pub reserved: [u8; 6],
     pub kernel_base: u64,
     pub kernel_size: u64,
     pub memory_map_addr: u64,
@@ -44,7 +47,8 @@ pub struct BootInfo {
 
 impl BootInfo {
     pub fn is_valid(&self) -> bool {
-        self.magic == BENNU_BOOT_MAGIC
+        (self.boot_protocol == BENNU_BOOT_PROTOCOL_BIOS_VBE || self.boot_protocol == BENNU_BOOT_PROTOCOL_UEFI_GOP)
+            && self.magic == BENNU_BOOT_MAGIC
             && self.version == BENNU_BOOT_VERSION
             && self.size as usize >= core::mem::size_of::<Self>()
             && self.memory_map_entry_size as usize == core::mem::size_of::<E820Entry>()
