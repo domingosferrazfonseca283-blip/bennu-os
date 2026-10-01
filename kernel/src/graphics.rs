@@ -49,11 +49,29 @@ fn glyph(byte: u8, row: usize) -> u8 {
 
 impl Framebuffer {
     pub unsafe fn text(&self, x:usize, y:usize, text:&[u8], scale:usize, fg:u32) {
-        let mut cursor=x;
+        let scale = core::cmp::max(scale, 1);
+        let mut cursor = x;
+        let mut baseline = y;
         for &byte in text {
-            if byte==b'\n' { cursor=x; continue; }
-            for row in 0..8 { let bits=glyph(byte,row); for col in 0..8 { if bits & (0x80>>col) != 0 { self.fill_rect(cursor+col*scale,y+row*scale,scale,scale,fg); } } }
-            cursor += 8*scale;
+            if byte == b'\\n' {
+                cursor = x;
+                baseline = baseline.saturating_add(9 * scale);
+                continue;
+            }
+            if cursor.saturating_add(8 * scale) > self.width {
+                cursor = x;
+                baseline = baseline.saturating_add(9 * scale);
+            }
+            if baseline.saturating_add(8 * scale) > self.height { break; }
+            for row in 0..8 {
+                let bits = glyph(byte, row);
+                for col in 0..8 {
+                    if bits & (0x80 >> col) != 0 {
+                        self.fill_rect(cursor + col * scale, baseline + row * scale, scale, scale, fg);
+                    }
+                }
+            }
+            cursor = cursor.saturating_add(8 * scale);
         }
     }
 }
