@@ -185,3 +185,54 @@ impl JournalRecord {
         }
     }
 }
+
+
+pub const fn blocks_for_bytes(bytes: u64) -> Option<u64> {
+    if bytes == 0 { return Some(0); }
+    bytes.checked_add(BENNUFS_BLOCK_SIZE as u64 - 1).map(|v| v / BENNUFS_BLOCK_SIZE as u64)
+}
+
+pub const fn data_block_start(superblock: &Superblock) -> Option<u64> {
+    if !superblock.valid() { return None; }
+    Some(superblock.metadata_blocks)
+}
+
+pub const fn data_block_end(superblock: &Superblock) -> Option<u64> {
+    if !superblock.valid() { return None; }
+    Some(superblock.total_blocks)
+}
+
+pub const fn data_block_count(superblock: &Superblock) -> Option<u64> {
+    if !superblock.valid() { return None; }
+    superblock.total_blocks.checked_sub(superblock.metadata_blocks)
+}
+
+pub const fn serialize_superblock(superblock: &Superblock, out: &mut [u8]) -> bool {
+    if !superblock.valid() || out.len() < core::mem::size_of::<Superblock>() { return false; }
+    let src = superblock as *const Superblock as *const u8;
+    let mut i = 0;
+    while i < core::mem::size_of::<Superblock>() {
+        out[i] = unsafe { *src.add(i) };
+        i += 1;
+    }
+    true
+}
+
+pub const fn deserialize_superblock(bytes: &[u8]) -> Option<Superblock> {
+    if bytes.len() < core::mem::size_of::<Superblock>() { return None; }
+    let mut value = Superblock::EMPTY;
+    let dst = &mut value as *mut Superblock as *mut u8;
+    let mut i = 0;
+    while i < core::mem::size_of::<Superblock>() {
+        unsafe { *dst.add(i) = bytes[i]; }
+        i += 1;
+    }
+    if value.valid() { Some(value) } else { None }
+}
+
+pub const fn block_range(superblock: &Superblock, first: u64, count: u64) -> Option<(u64,u64)> {
+    if !superblock.valid() || count == 0 { return None; }
+    let end = match first.checked_add(count) { Some(v) => v, None => return None };
+    if first < superblock.metadata_blocks || end > superblock.total_blocks { return None; }
+    Some((first, end))
+}
