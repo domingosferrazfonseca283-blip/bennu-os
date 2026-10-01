@@ -19,9 +19,10 @@ pub struct PendingCommand {
  pub command_trb:u64,
  pub owner_cell:u64,
  pub operation:u8,
+ pub port:u8,
 }
 impl PendingCommand {
- pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,command_trb:0,owner_cell:0,operation:0};
+ pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,command_trb:0,owner_cell:0,operation:0,port:0};
 }
 
 #[repr(C)]
@@ -297,7 +298,7 @@ impl DeviceFabric {
     for (address,mps) in endpoints {
      let command_trb=super::xhci::enqueue_configure_endpoint(&mut self.controllers[c],slot,address,mps)?;
      let pending=(0..MAX_PENDING_COMMANDS).find(|p| !self.pending[*p].valid).ok_or("device command tracking full")?;
-     self.pending[pending]=PendingCommand{valid:true,device,token:token.wrapping_add(count as u64),command_trb,owner_cell,operation:6};
+     self.pending[pending]=PendingCommand{valid:true,device,token:token.wrapping_add(count as u64),command_trb,owner_cell,operation:6,port:0};
      count+=1;
     }
     return Ok(count);
@@ -337,6 +338,30 @@ impl DeviceFabric {
   Ok(())
  }
 
+ pub fn start_usb_enumeration(&mut self,owner_cell:u64)->Result<usize,&'static str> {
+  let mut queued=0usize;
+  for c in 0..self.controller_count {
+   let controller_object=self.controllers[c].object;
+   let ports=self.controllers[c].ports;
+   for port in 1..=ports {
+    let status=unsafe { super::xhci::read_port_status(self.controllers[c].mmio_base,self.controllers[c].capability,port)? };
+    if status & super::xhci::PORTSC_CCS == 0 { continue; }
+    let _=unsafe { super::xhci::reset_port(self.controllers[c].mmio_base,self.controllers[c].capability,port) };
+    let status_after=unsafe { super::xhci::read_port_status(self.controllers[c].mmio_base,self.controllers[c].capability,port)? };
+    self.controllers[c].ports_state[(port-1) as usize].status=status_after;
+    self.controllers[c].ports_state[(port-1) as usize].connected=true;
+    let pending=(0..MAX_PENDING_COMMANDS).find(|p| !self.pending[*p].valid).ok_or("device command tracking full")?;
+    let token=0x1000u64+(port as u64);
+    let command_trb=super::xhci::enqueue_enable_slot(&mut self.controllers[c])?;
+    self.pending[pending]=PendingCommand{
+     valid:true,device:controller_object,token,command_trb,owner_cell,operation:1,port
+    };
+    queued+=1;
+   }
+  }
+  Ok(queued)
+ }
+
  pub fn submit(&mut self, request:&super::DeviceRequest)->Result<(),&'static str> {
 
   for u in 0..MAX_DEVICES { if self.usb_devices[u].object==request.device && !request.device.is_null() { let controller=self.usb_devices[u].controller; for c in 0..self.controller_count { if self.controllers[c].object==controller { return match request.opcode { 4=>self.submit_usb_control(c,request,2), 5=>self.submit_usb_set_configuration(c,request), 7=>self.submit_usb_bulk(c,request,true), 8=>self.submit_usb_bulk(c,request,false), _=>Err("unsupported USB device operation") }; } } return Err("USB controller unavailable"); } }
@@ -355,7 +380,7 @@ impl DeviceFabric {
        let command_trb=super::xhci::enqueue_enable_slot(&mut self.controllers[c])?;
        self.pending[pending_slot]=PendingCommand{
         valid:true,device:request.device,token:request.token,command_trb,
-        owner_cell:request.owner_cell,operation:request.opcode as u8
+        owner_cell:request.owner_cell,operation:request.opcode as u8,port:(request.flags & 0xff) as u8
        };
        Ok(())
       },
@@ -365,7 +390,7 @@ impl DeviceFabric {
        let slot=request.value as u8;
        let port=(request.flags & 0xff) as u8;
        let command_trb=super::xhci::enqueue_address_device_for_port(&mut self.controllers[c],slot,port)?;
-       self.pending[pending_slot]=PendingCommand{valid:true,device:request.device,token:request.token,command_trb,owner_cell:request.owner_cell,operation:request.opcode as u8};
+       self.pending[pending_slot]=PendingCommand{valid:true,device:request.device,token:request.token,command_trb,owner_cell:request.owner_cell,operation:request.opcode as u8,port:(request.flags & 0xff) as u8};
        Ok(())
       },
       _ => Err("unsupported xHCI device operation"),
