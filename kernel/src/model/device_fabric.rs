@@ -358,6 +358,15 @@ impl DeviceFabric {
      for p in 0..MAX_PENDING_TRANSFERS {
       if !self.transfers[p].valid || self.transfers[p].slot!=event.slot_id() || ptr!=self.transfers[p].completion_trb { continue; }
       let t=self.transfers[p];
+      if t.endpoint!=0 {
+       let key=super::xhci::endpoint_ring_key(t.endpoint);
+       let ring=self.controllers[c].endpoint_transfer_ring[t.slot as usize][key];
+       if ring!=0 && t.completion_trb>=ring {
+        let index=((t.completion_trb-ring)/core::mem::size_of::<super::xhci::Trb>() as u64) as u16;
+        let next=if index as usize>=super::xhci::XHCI_RING_TRBS-2 {0}else{index+1};
+        self.controllers[c].endpoint_transfer_dequeue[t.slot as usize][key]=next;
+       }
+      }
       self.transfers[p]=PendingTransfer::EMPTY;
       if event.completion_code()!=1 { return Some((t.device,t.token,event.slot_id(),event.completion_code(),t.operation,t.owner_cell,None)); }
 
