@@ -9,9 +9,11 @@ ORG 0x8000
 %error "KERNEL_SECTORS must be positive"
 %endif
 
-%if KERNEL_SECTORS > 120
-%error "kernel image exceeds early BIOS loader capacity"
+%if KERNEL_SECTORS > 65535
+%error "kernel image exceeds BIOS sector-count field"
 %endif
+
+%define BIOS_CHUNK_SECTORS 64
 
 %define BOOT_INFO        0x5000
 %define MEMORY_MAP       0x5100
@@ -61,14 +63,17 @@ start2:
     call detect_memory_map
     jc e820_error
 
+    ; Enable A20 so protected-mode copies can reach the full kernel image.
+    in al,0x92
+    or al,0x02
+    out 0x92,al
+
     mov ax, [e820_count]
     mov [BOOT_INFO + 48], ax
 
-    ; Load the kernel from LBA 5 into temporary low memory.
-    mov si, dap
-    mov dl, [boot_drive]
-    mov ah, 0x42
-    int 0x13
+    ; Stream the kernel through a bounded BIOS transfer buffer and copy
+    ; each chunk to its final address in extended memory.
+    call load_kernel
     jc disk_error
 
     cli
@@ -129,6 +134,77 @@ detect_memory_map:
     stc
     ret
 
+load_kernel:
+    mov word [kernel_remaining],KERNEL_SECTORS
+    mov dword [kernel_lba],5
+    mov dword [kernel_dest],KERNEL_LOAD
+.next:
+    cmp word [kernel_remaining],0
+    je .done
+    mov ax,[kernel_remaining]
+    cmp ax,BIOS_CHUNK_SECTORS
+    jbe .count_ready
+    mov ax,BIOS_CHUNK_SECTORS
+.count_ready:
+    mov [chunk_sectors],ax
+    mov [dap_count],ax
+    mov eax,[kernel_lba]
+    mov dword [dap_lba],eax
+    mov dword [dap_lba+4],0
+
+    mov si,dap
+    mov dl,[boot_drive]
+    mov ah,0x42
+    int 0x13
+    jc .failure
+
+    cli
+    lgdt [gdt_descriptor]
+    mov eax,cr0
+    or eax,1
+    mov cr0,eax
+    jmp 0x08:copy_chunk
+
+.done:
+    clc
+    ret
+.failure:
+    stc
+    ret
+
+BITS 32
+copy_chunk:
+    mov ax,0x10
+    mov ds,ax
+    mov es,ax
+    mov ss,ax
+    mov esi,0x10000
+    mov edi,[kernel_dest]
+    movzx ecx,word [chunk_sectors]
+    shl ecx,7
+    rep movsd
+
+    movzx eax,word [chunk_sectors]
+    add [kernel_lba],eax
+    sub [kernel_remaining],ax
+    shl eax,9
+    add [kernel_dest],eax
+
+    mov eax,cr0
+    and eax,0xFFFFFFFE
+    mov cr0,eax
+    jmp 0x0000:real_mode_after_copy
+
+BITS 16
+real_mode_after_copy:
+    xor ax,ax
+    mov ds,ax
+    mov es,ax
+    mov ss,ax
+    mov sp,STACK_TOP & 0xFFFF
+    sti
+    jmp load_kernel
+
 e820_error:
     cli
     hlt
@@ -142,13 +218,19 @@ disk_error:
 boot_drive db 0
 e820_count dw 0
 e820_cursor dw MEMORY_MAP
+kernel_remaining dw KERNEL_SECTORS
+chunk_sectors dw 0
+kernel_lba dd 5
+kernel_dest dd KERNEL_LOAD
 
 dap:
     db 0x10
     db 0
-    dw KERNEL_SECTORS
+dap_count:
+    dw 0
     dw 0x0000
     dw 0x1000
+dap_lba:
     dq 5
 
 BITS 32
@@ -159,22 +241,17 @@ protected_mode:
     mov ss, ax
     mov esp, STACK_TOP
 
-    ; Copy the loaded kernel from 0x10000 to 1 MiB.
-    mov esi, 0x10000
-    mov edi, KERNEL_LOAD
-    mov ecx, (KERNEL_SECTORS * 512) / 4
-    rep movsd
-
     ; Zero the page-table pages. The early stack is now safely below them.
     mov edi, PML4
     xor eax, eax
     mov ecx, (0x3000 / 4)
     rep stosd
 
-    ; PML4 -> PDPT -> PD, identity-map the first 2 MiB.
+    ; PML4 -> PDPT -> PD, identity-map the first 4 MiB.
     mov dword [PML4], PDPT | 0x003
     mov dword [PDPT], PD | 0x003
     mov dword [PD], 0x00000083
+    mov dword [PD + 8], 0x00200083
 
     mov eax, PML4
     mov cr3, eax
