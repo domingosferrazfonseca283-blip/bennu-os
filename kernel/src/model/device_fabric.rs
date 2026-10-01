@@ -81,7 +81,21 @@ impl DeviceFabric {
   for i in 0..self.device_count { if self.devices[i].descriptor.object==object { return true; } }
   false
  }
+ fn submit_usb_control(&mut self,c:usize,request:&super::DeviceRequest,descriptor_type:u8)->Result<(),&'static str> {
+  let slot=request.value as u8;
+  let length=(if descriptor_type==1 {18} else {request.length as usize}).min(4096);
+  if length==0 { return Err("USB transfer length is zero"); }
+  let dma=crate::memory::allocate_frame_below(super::xhci::XHCI_DMA_LIMIT).ok_or("USB transfer DMA buffer allocation failed")?;
+  unsafe { core::ptr::write_bytes(dma as *mut u8,0,crate::memory::PAGE_SIZE); }
+  let setup=super::xhci::UsbSetupPacket::get_descriptor(descriptor_type,0,length as u16);
+  let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,setup,dma,length as u16)?;
+  let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
+  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode};
+  Ok(())
+ }
  pub fn submit(&mut self, request:&super::DeviceRequest)->Result<(),&'static str> {
+  for u in 0..MAX_DEVICES { if self.usb_devices[u].object==request.device && !request.device.is_null() { let controller=self.usb_devices[u].controller; for c in 0..self.controller_count { if self.controllers[c].object==controller { return match request.opcode { 4=>self.submit_usb_control(c,request,2), _=>Err("unsupported USB device operation") }; } } return Err("USB controller unavailable"); } }
+
   for i in 0..self.device_count {
    if self.devices[i].descriptor.object != request.device { continue; }
    if self.devices[i].descriptor.class == DeviceClass::UsbController {
@@ -100,7 +114,7 @@ impl DeviceFabric {
        };
        Ok(())
       },
-      2 | 4 => { let slot=request.value as u8; let length=(if request.opcode==2 {18} else {request.length as usize}).min(4096); if length==0 { return Err("USB transfer length is zero"); } let dma=crate::memory::allocate_frame_below(super::xhci::XHCI_DMA_LIMIT).ok_or("USB transfer DMA buffer allocation failed")?; unsafe { core::ptr::write_bytes(dma as *mut u8,0,crate::memory::PAGE_SIZE); } let setup=if request.opcode==2 {super::xhci::UsbSetupPacket::get_descriptor(1,0,length as u16)} else {super::xhci::UsbSetupPacket::get_descriptor(2,0,length as u16)}; let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,setup,dma,length as u16)?; let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?; self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode}; Ok(()) },
+      2 | 4 => { self.submit_usb_control(c,request,if request.opcode==2 {1} else {2})?; Ok(()) },
       3 => {
        let pending_slot=match (0..MAX_PENDING_COMMANDS).find(|p| !self.pending[*p].valid) { Some(p)=>p, None=>return Err("device command tracking full") };
        let slot=request.value as u8;
