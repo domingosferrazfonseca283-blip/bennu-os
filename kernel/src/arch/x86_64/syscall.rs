@@ -27,8 +27,7 @@ bennu_syscall_entry:
     mov r15, [rip + bennu_kernel_root]
     mov cr3, r15
 
-    lea rdi, [rsp + 8]
-    call bennu_syscall_dispatch
+    // Stack layout: CR3, r15..r11. RegisterFrame starts at the saved r11.\n    lea rdi, [rsp + 120]\n    call bennu_syscall_dispatch
     cmp rax, 5
     jne 1f
     call bennu_syscall_yield
