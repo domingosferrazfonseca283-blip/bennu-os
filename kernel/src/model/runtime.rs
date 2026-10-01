@@ -57,6 +57,7 @@ pub fn service_device_events() {
             if let Some(desc) = descriptor {
                 if let Ok(object) = create_object(super::ObjectKind::Device, owner_cell as u32) {
                     if DEVICE_FABRIC.lock().get_mut().attach_usb_descriptor(slot, object, desc).is_ok() {
+                        let _ = grant(CellId(owner_cell as u64), object, super::CapabilityRights::READ.union(super::CapabilityRights::OBSERVE).union(super::CapabilityRights::DEVICE));
                         published = object;
                     }
                 }
