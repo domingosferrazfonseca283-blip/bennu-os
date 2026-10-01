@@ -23,6 +23,7 @@ impl IoEnvelope{pub const EMPTY:Self=Self{request:BlockRequest::EMPTY,completion
 #[repr(C)]
 #[derive(Clone,Copy)]
 pub struct DeviceRequest {
+    pub owner_cell:u64,
     pub device:ObjectId,
     pub opcode:u32,
     pub flags:u32,
@@ -33,6 +34,6 @@ pub struct DeviceRequest {
     pub token:u64,
 }
 impl DeviceRequest {
-    pub const EMPTY:Self=Self{device:ObjectId::NULL,opcode:0,flags:0,argument:0,value:0,buffer:0,length:0,token:0};
+    pub const EMPTY:Self=Self{owner_cell:0,device:ObjectId::NULL,opcode:0,flags:0,argument:0,value:0,buffer:0,length:0,token:0};
     pub const fn is_valid(&self)->bool{!self.device.is_null()&&self.opcode!=0&&self.token!=0&&self.length!=0}
 }
