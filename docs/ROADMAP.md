@@ -74,7 +74,7 @@
 - [x] SET_CONFIGURATION como Control Transfer EP0
 - [x] parser nativo de Configuration Descriptor / interfaces / endpoints
 - [ ] Bulk Transfer Rings persistentes
-- [ ] SET_ADDRESS/SET_CONFIGURATION end-to-end
+- [ ] SET_ADDRESS / enumeration end-to-end
 - [ ] SET_ADDRESS/SET_CONFIGURATION end-to-end
 - [ ] fila de requests de bloco assíncrona
 - [ ] BennuFS
