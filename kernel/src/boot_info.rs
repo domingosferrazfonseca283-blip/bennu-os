@@ -5,6 +5,7 @@ pub const BENNU_BOOT_MAGIC: u64 = 0x4245_4e4e_554f_5301;
 pub const BENNU_BOOT_VERSION: u32 = 1;
 pub const BENNU_E820_USABLE: u32 = 1;
 pub const BENNU_E820_MAX_ENTRIES: usize = 128;
+pub const BENNU_FRAMEBUFFER_BYTES_PER_PIXEL: u32 = 4;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -27,6 +28,11 @@ pub struct BootInfo {
     pub memory_map_addr: u64,
     pub memory_map_entries: u32,
     pub memory_map_entry_size: u32,
+    pub framebuffer_addr: u64,
+    pub framebuffer_pitch: u32,
+    pub framebuffer_width: u32,
+    pub framebuffer_height: u32,
+    pub framebuffer_bpp: u32,
 }
 
 impl BootInfo {
