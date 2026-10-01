@@ -59,7 +59,7 @@ pub fn geometry_from_read_capacity10(bytes:&[u8]) -> Result<BlockGeometry,&'stat
     Ok(BlockGeometry{block_size,block_count})
 }
 
-pub const fn lba_byte_range(geometry:BlockGeometry,lba:u64,blocks:u32)->Option<(u64,u64)> {
+pub fn lba_byte_range(geometry:BlockGeometry,lba:u64,blocks:u32)->Option<(u64,u64)> {
     if !geometry.valid() || blocks==0 || lba>=geometry.block_count { return None; }
     let end_lba=lba.checked_add(blocks as u64)?;
     if end_lba>geometry.block_count { return None; }
@@ -99,7 +99,7 @@ impl ScsiBlockCommand {
   if lba>0xffff_ffff || blocks==0 || blocks>0xffff { return None; }
   Some(Self{command:super::ScsiCommand::write10(lba as u32,blocks as u16),lba,blocks,direction_in:false})
  }
- pub const fn transfer_bytes(&self,geometry:BlockGeometry)->Option<u64> {
+ pub fn transfer_bytes(&self,geometry:BlockGeometry)->Option<u64> {
   if self.blocks==0 { return Some(0); }
   let range=lba_byte_range(geometry,self.lba,self.blocks)?;
   Some(range.1)
