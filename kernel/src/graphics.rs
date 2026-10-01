@@ -5,6 +5,12 @@ pub struct Framebuffer {
     width: usize,
     height: usize,
     pitch_pixels: usize,
+    red_mask: u8,
+    red_shift: u8,
+    green_mask: u8,
+    green_shift: u8,
+    blue_mask: u8,
+    blue_shift: u8,
 }
 
 impl Framebuffer {
@@ -12,7 +18,14 @@ impl Framebuffer {
         if boot_info.framebuffer_addr == 0 || boot_info.framebuffer_width == 0 || boot_info.framebuffer_height == 0 || boot_info.framebuffer_pitch == 0 || boot_info.framebuffer_bpp != 32 { return Err("no supported framebuffer"); }
         let bytes = (boot_info.framebuffer_pitch as u64).checked_mul(boot_info.framebuffer_height as u64).ok_or("framebuffer size overflow")?;
         let base = crate::memory::paging::map_mmio(boot_info.framebuffer_addr, bytes)? as *mut u32;
-        Ok(Self { base, width: boot_info.framebuffer_width as usize, height: boot_info.framebuffer_height as usize, pitch_pixels: boot_info.framebuffer_pitch as usize / 4 })
+        Ok(Self { base, width: boot_info.framebuffer_width as usize, height: boot_info.framebuffer_height as usize, pitch_pixels: boot_info.framebuffer_pitch as usize / 4, red_mask: boot_info.framebuffer_red_mask, red_shift: boot_info.framebuffer_red_position, green_mask: boot_info.framebuffer_green_mask, green_shift: boot_info.framebuffer_green_position, blue_mask: boot_info.framebuffer_blue_mask, blue_shift: boot_info.framebuffer_blue_position })
+    }
+
+    fn pixel(&self, red: u8, green: u8, blue: u8) -> u32 {
+        let r = ((red as u32 * self.red_mask as u32 + 127) / 255) << self.red_shift;
+        let g = ((green as u32 * self.green_mask as u32 + 127) / 255) << self.green_shift;
+        let b = ((blue as u32 * self.blue_mask as u32 + 127) / 255) << self.blue_shift;
+        r | g | b
     }
 
     pub unsafe fn clear(&self, pixel: u32) { for y in 0..self.height { let row=self.base.add(y*self.pitch_pixels); for x in 0..self.width { core::ptr::write_volatile(row.add(x),pixel); } } }
@@ -81,10 +94,18 @@ pub fn init(boot_info: &BootInfo) -> Result<(), &'static str> {
             }
         }
 
-        let fb = Framebuffer { base: framebuffer, width, height, pitch_pixels };
-        fb.text(24, 20, b"BENNU OS", b"\0".len().max(2), 0x00ffffff);
-        fb.fill_rect(24, 112, core::cmp::min(360, width.saturating_sub(48)), 2, 0x0040a0ff);
-        fb.text(24, 136, b"VIDEO ONLINE", 2, 0x00a0d8ff);
+        let fb = Framebuffer {
+            base: framebuffer, width, height, pitch_pixels,
+            red_mask: boot_info.framebuffer_red_mask, red_shift: boot_info.framebuffer_red_position,
+            green_mask: boot_info.framebuffer_green_mask, green_shift: boot_info.framebuffer_green_position,
+            blue_mask: boot_info.framebuffer_blue_mask, blue_shift: boot_info.framebuffer_blue_position,
+        };
+        let white = fb.pixel(255, 255, 255);
+        let accent = fb.pixel(64, 160, 255);
+        let text = fb.pixel(160, 216, 255);
+        fb.text(24, 20, b"BENNU OS", 2, white);
+        fb.fill_rect(24, 112, core::cmp::min(360, width.saturating_sub(48)), 2, accent);
+        fb.text(24, 136, b"VIDEO ONLINE", 2, text);
     }
 
     Ok(())
