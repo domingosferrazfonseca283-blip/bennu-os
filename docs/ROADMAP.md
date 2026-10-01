@@ -66,7 +66,11 @@
 - [x] consumo da fila DeviceRequest pelo Device Fabric/xHCI
 - [x] Device Fabric persistente no runtime
 - [x] confirmação de DeviceRequest pelo Event Ring xHCI
-- [x] completions de DeviceRequest no Event Fabric
+- [x] completions tipadas de DeviceRequest no Event Fabric
+- [x] tracking persistente de Transfer Ring por slot
+- [x] buffer DMA nativo para GET_DESCRIPTOR sem expor VA USER ao hardware
+- [ ] persistência do descritor USB e estado Addressed/Configured
+- [ ] SET_ADDRESS/SET_CONFIGURATION end-to-end
 - [ ] fila de requests de bloco assíncrona
 - [ ] BennuFS
 - [ ] journaling/recuperação
