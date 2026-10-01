@@ -48,3 +48,22 @@ impl BlockRequest {
         !self.device.is_null() && self.blocks != 0 && self.token != 0
     }
 }
+
+
+pub fn geometry_from_read_capacity10(bytes:&[u8]) -> Result<BlockGeometry,&'static str> {
+    if bytes.len()<8 { return Err("READ CAPACITY(10) response truncated"); }
+    let last_lba=u32::from_be_bytes([bytes[0],bytes[1],bytes[2],bytes[3]]) as u64;
+    let block_size=u32::from_be_bytes([bytes[4],bytes[5],bytes[6],bytes[7]]);
+    if block_size==0 { return Err("invalid SCSI block size"); }
+    let block_count=last_lba.checked_add(1).ok_or("SCSI block count overflow")?;
+    Ok(BlockGeometry{block_size,block_count})
+}
+
+pub const fn lba_byte_range(geometry:BlockGeometry,lba:u64,blocks:u32)->Option<(u64,u64)> {
+    if !geometry.valid() || blocks==0 || lba>=geometry.block_count { return None; }
+    let end_lba=lba.checked_add(blocks as u64)?;
+    if end_lba>geometry.block_count { return None; }
+    let offset=lba.checked_mul(geometry.block_size as u64)?;
+    let length=(blocks as u64).checked_mul(geometry.block_size as u64)?;
+    Some((offset,length))
+}
