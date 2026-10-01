@@ -70,7 +70,7 @@ impl DeviceFabric {
     self.usb_devices[i]=super::UsbDevice{
      object,controller,descriptor,configuration:super::UsbConfiguration::EMPTY,
      topology:super::UsbDeviceTopology::EMPTY,slot,port:0,
-     state:super::usb::UsbDeviceState::Default,configured:false,
+     state:super::usb::UsbDeviceState::Addressed,configured:false,
     };
     return Ok(());
    }
@@ -92,6 +92,41 @@ impl DeviceFabric {
   let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
   self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode};
   Ok(())
+ }
+ fn parse_configuration(&mut self,device:ObjectId,dma:u64,length:u64)->Result<(),&'static str> {
+  if length<9 { return Err("USB configuration descriptor truncated"); }
+  unsafe {
+   let p=dma as *const u8;
+   if core::ptr::read_volatile(p)!=9 || core::ptr::read_volatile(p.add(1))!=super::usb::USB_CONFIGURATION_DESCRIPTOR_TYPE { return Err("invalid USB configuration descriptor"); }
+   let total=(core::ptr::read_volatile(p.add(2)) as u16) | ((core::ptr::read_volatile(p.add(3)) as u16)<<8);
+   let configuration=core::ptr::read_volatile(p.add(5));
+   let interfaces=core::ptr::read_volatile(p.add(4));
+   let max_power=(core::ptr::read_volatile(p.add(8)) as u16)*2;
+   for i in 0..MAX_DEVICES {
+    if self.usb_devices[i].object!=device { continue; }
+    self.usb_devices[i].configuration=super::UsbConfiguration{configuration,interfaces,max_power_ma:max_power};
+    self.usb_devices[i].topology=super::UsbDeviceTopology::EMPTY;
+    let limit=(total as usize).min(length as usize).min(4096);
+    let mut off=0usize;
+    let mut current_interface:Option<super::UsbInterface>=None;
+    while off+2<=limit {
+     let len=core::ptr::read_volatile(p.add(off)) as usize;
+     let typ=core::ptr::read_volatile(p.add(off+1));
+     if len<2 || off+len>limit { break; }
+     if typ==super::usb::USB_INTERFACE_DESCRIPTOR_TYPE && len>=9 {
+      let v=super::UsbInterface{number:core::ptr::read_volatile(p.add(off+2)),alternate:core::ptr::read_volatile(p.add(off+3)),class_code:core::ptr::read_volatile(p.add(off+5)),subclass:core::ptr::read_volatile(p.add(off+6)),protocol:core::ptr::read_volatile(p.add(off+7)),endpoint_count:core::ptr::read_volatile(p.add(off+4))};
+      let _=self.usb_devices[i].topology.add_interface(v); current_interface=Some(v);
+     } else if typ==super::usb::USB_ENDPOINT_DESCRIPTOR_TYPE && len>=7 {
+      let v=super::UsbEndpointDescriptor{address:core::ptr::read_volatile(p.add(off+2)),attributes:core::ptr::read_volatile(p.add(off+3)),max_packet:(core::ptr::read_volatile(p.add(off+4)) as u16)|((core::ptr::read_volatile(p.add(off+5)) as u16)<<8),interval:core::ptr::read_volatile(p.add(off+6))};
+      let _=self.usb_devices[i].topology.add_endpoint(v);
+     }
+     off+=len;
+    }
+    let _=current_interface;
+    return Ok(());
+   }
+  }
+  Err("USB device object not found")
  }
  fn submit_usb_set_configuration(&mut self,c:usize,request:&super::DeviceRequest)->Result<(),&'static str> {
   let slot=request.value as u8;
@@ -149,7 +184,7 @@ impl DeviceFabric {
    if event.is_none() { continue; }
    let event=event.unwrap();
    match event.event_type() {
-    super::xhci::TRB_TYPE_TRANSFER_EVENT => { let ptr=event.trb.parameter & !0xFu64; for p in 0..MAX_PENDING_TRANSFERS { if self.transfers[p].valid && self.transfers[p].slot==event.slot_id() && ptr==self.transfers[p].completion_trb { let t=self.transfers[p]; self.transfers[p]=PendingTransfer::EMPTY; if event.completion_code()==1 { if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell as u64)) { let _=crate::memory::user::copy_to_user(root,t.user_buffer,t.dma_buffer as *const u8,t.length as usize); } } let descriptor = if event.slot_id() != 0 && event.completion_code() == 1 {
+    super::xhci::TRB_TYPE_TRANSFER_EVENT => { let ptr=event.trb.parameter & !0xFu64; for p in 0..MAX_PENDING_TRANSFERS { if self.transfers[p].valid && self.transfers[p].slot==event.slot_id() && ptr==self.transfers[p].completion_trb { let t=self.transfers[p]; self.transfers[p]=PendingTransfer::EMPTY; if event.completion_code()==1 { if t.operation==4 { let _=self.parse_configuration(t.device,t.dma_buffer,t.length); } if t.operation==5 { for i in 0..MAX_DEVICES { if self.usb_devices[i].object==t.device { self.usb_devices[i].state=super::usb::UsbDeviceState::Configured; self.usb_devices[i].configured=true; } } } if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell as u64)) { let _=crate::memory::user::copy_to_user(root,t.user_buffer,t.dma_buffer as *const u8,t.length as usize); } } let descriptor = if event.slot_id() != 0 && event.completion_code() == 1 {
           unsafe {
            let p=t.dma_buffer as *const u8;
            if core::ptr::read_volatile(p.add(1)) == super::usb::USB_DEVICE_DESCRIPTOR_TYPE && core::ptr::read_volatile(p) >= 18 {
