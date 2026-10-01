@@ -348,6 +348,7 @@ impl DeviceFabric {
     if status & super::xhci::PORTSC_CCS == 0 { continue; }
     let _=unsafe { super::xhci::reset_port(self.controllers[c].mmio_base,self.controllers[c].capability,port) };
     let status_after=unsafe { super::xhci::read_port_status(self.controllers[c].mmio_base,self.controllers[c].capability,port)? };
+    if status_after & super::xhci::PORTSC_PED == 0 { continue; }
     self.controllers[c].ports_state[(port-1) as usize].status=status_after;
     self.controllers[c].ports_state[(port-1) as usize].connected=true;
     let pending=(0..MAX_PENDING_COMMANDS).find(|p| !self.pending[*p].valid).ok_or("device command tracking full")?;
