@@ -223,6 +223,18 @@ impl DeviceFabric {
  }
 
  
+ pub fn mass_storage_endpoint_command_completed(&mut self,device:ObjectId,token:u64,owner_cell:u64)->Result<(),&'static str> {
+  for i in 0..MAX_DEVICES {
+   if self.usb_devices[i].object!=device { continue; }
+   if self.mass_storage[i].configured_endpoints<2 { self.mass_storage[i].configured_endpoints+=1; }
+   if self.mass_storage[i].configured_endpoints>=2 && self.mass_storage[i].stage==super::UsbMassStorageStage::Idle {
+    return self.start_mass_storage_probe(device,token.wrapping_add(1),owner_cell);
+   }
+   return Ok(());
+  }
+  Err("mass-storage device not found")
+ }
+
  pub fn configure_mass_storage_endpoints(&mut self,device:ObjectId,token:u64,owner_cell:u64)->Result<usize,&'static str> {
   for i in 0..MAX_DEVICES {
    if self.usb_devices[i].object!=device { continue; }
