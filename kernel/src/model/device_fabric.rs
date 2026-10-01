@@ -93,8 +93,19 @@ impl DeviceFabric {
   self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode};
   Ok(())
  }
+ fn submit_usb_set_configuration(&mut self,c:usize,request:&super::DeviceRequest)->Result<(),&'static str> {
+  let slot=request.value as u8;
+  if slot==0 { return Err("USB slot missing"); }
+  let configuration=(request.flags & 0xff) as u8;
+  if configuration==0 { return Err("USB configuration value missing"); }
+  let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,super::xhci::UsbSetupPacket::set_configuration(configuration),0,0)?;
+  let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
+  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+16,owner_cell:request.owner_cell,user_buffer:0,dma_buffer:0,length:0,operation:request.opcode};
+  Ok(())
+ }
  pub fn submit(&mut self, request:&super::DeviceRequest)->Result<(),&'static str> {
-  for u in 0..MAX_DEVICES { if self.usb_devices[u].object==request.device && !request.device.is_null() { let controller=self.usb_devices[u].controller; for c in 0..self.controller_count { if self.controllers[c].object==controller { return match request.opcode { 4=>self.submit_usb_control(c,request,2), _=>Err("unsupported USB device operation") }; } } return Err("USB controller unavailable"); } }
+
+  for u in 0..MAX_DEVICES { if self.usb_devices[u].object==request.device && !request.device.is_null() { let controller=self.usb_devices[u].controller; for c in 0..self.controller_count { if self.controllers[c].object==controller { return match request.opcode { 4=>self.submit_usb_control(c,request,2), 5=>self.submit_usb_set_configuration(c,request), _=>Err("unsupported USB device operation") }; } } return Err("USB controller unavailable"); } }
 
   for i in 0..self.device_count {
    if self.devices[i].descriptor.object != request.device { continue; }
