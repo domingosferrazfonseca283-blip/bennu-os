@@ -53,7 +53,7 @@ impl Framebuffer {
         let mut cursor = x;
         let mut baseline = y;
         for &byte in text {
-            if byte == b'\\n' {
+            if byte == b'\n' {
                 cursor = x;
                 baseline = baseline.saturating_add(9 * scale);
                 continue;
