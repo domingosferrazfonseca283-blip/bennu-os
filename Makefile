@@ -16,6 +16,7 @@ image:
 	KERNEL_ELF=$$(find kernel/target -type f -path '*/release/bennu-kernel' -print -quit); \
 	test -n "$$KERNEL_ELF" || exit 1; \
 	llvm-objcopy -O binary "$$KERNEL_ELF" $(KERNEL_BIN)
+	@KERNEL_BYTES=$$(wc -c < $(KERNEL_BIN)); \
 	KERNEL_SECTORS=$$(( (KERNEL_BYTES + 511) / 512 )); \
 	if [ $$KERNEL_SECTORS -gt $(MAX_EARLY_KERNEL_SECTORS) ]; then \
 		echo "error: kernel is $$KERNEL_SECTORS sectors; early BIOS loader supports at most $(MAX_EARLY_KERNEL_SECTORS)"; \
