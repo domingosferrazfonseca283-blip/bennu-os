@@ -6,6 +6,8 @@ pub mod boot_info;
 pub mod memory;
 pub mod model;
 pub mod graphics;
+pub mod drivers;
+pub mod process;
 
 fn arch_user_install(root: u64) -> Result<(), &'static str> {
     arch::x86_64::userspace::install(model::CellId(2), root)
@@ -17,6 +19,8 @@ extern "C" fn bootstrap_cell() -> model::CellAction {
 
 pub fn init(boot_info: *const boot_info::BootInfo) {
     arch::init();
+    drivers::keyboard::init();
+    drivers::console::init();
     model::runtime::init();
     model::init_io_fabric(model::policy::AccessPolicy::USB_FIRST);
 
