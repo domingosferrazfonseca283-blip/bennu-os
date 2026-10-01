@@ -47,6 +47,7 @@ start2:
     mov dword [BOOT_INFO + 8], 1
     mov dword [BOOT_INFO + 12], 88
     mov byte  [BOOT_INFO + 16], dl
+    mov byte  [BOOT_INFO + 17], 1
 
     mov dword [BOOT_INFO + 24], KERNEL_LOAD
     mov dword [BOOT_INFO + 28], 0
