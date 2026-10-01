@@ -9,6 +9,7 @@ impl UsbDeviceDescriptor{pub const EMPTY:Self=Self{address:UsbAddress{bus:0,addr
 pub const USB_DEVICE_DESCRIPTOR_TYPE:u8=1;
 pub const USB_CONFIGURATION_DESCRIPTOR_TYPE:u8=2;
 pub const USB_MAX_ADDRESS:u8=127;
+#[repr(u8)]#[derive(Clone,Copy,PartialEq,Eq)]pub enum UsbDeviceState{Detached=0,Default=1,Addressed=2,Configured=3}
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -25,10 +26,14 @@ pub struct UsbDevice {
  pub object:super::ObjectId,
  pub descriptor:UsbDeviceDescriptor,
  pub configuration:UsbConfiguration,
+ pub topology:UsbDeviceTopology,
+ pub slot:u8,
+ pub port:u8,
+ pub state:UsbDeviceState,
  pub configured:bool,
 }
 impl UsbDevice {
- pub const EMPTY:Self=Self{object:super::ObjectId::NULL,descriptor:UsbDeviceDescriptor::EMPTY,configuration:UsbConfiguration::EMPTY,configured:false};
+ pub const EMPTY:Self=Self{object:super::ObjectId::NULL,descriptor:UsbDeviceDescriptor::EMPTY,configuration:UsbConfiguration::EMPTY,topology:UsbDeviceTopology::EMPTY,slot:0,port:0,state:UsbDeviceState::Detached,configured:false};
  pub const fn is_mass_storage(&self)->bool {
   self.descriptor.class_code==8
  }
