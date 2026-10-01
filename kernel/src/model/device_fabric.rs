@@ -362,6 +362,40 @@ impl DeviceFabric {
   Ok(queued)
  }
 
+ pub fn continue_usb_enumeration(&mut self,controller:ObjectId,slot:u8,port:u8,owner_cell:u64,token:u64)->Result<(),&'static str> {
+  if slot==0 || port==0 { return Err("USB enumeration slot/port missing"); }
+  for c in 0..self.controller_count {
+   if self.controllers[c].object!=controller { continue; }
+   let command_trb=super::xhci::enqueue_address_device_for_port(&mut self.controllers[c],slot,port)?;
+   let pending=(0..MAX_PENDING_COMMANDS).find(|p| !self.pending[*p].valid).ok_or("device command tracking full")?;
+   self.pending[pending]=PendingCommand{
+    valid:true,device:controller,token:token.wrapping_add(1),command_trb,
+    owner_cell,operation:3,port
+   };
+   return Ok(());
+  }
+  Err("USB controller unavailable")
+ }
+
+ pub fn fetch_usb_device_descriptor(&mut self,controller:ObjectId,slot:u8,owner_cell:u64,token:u64)->Result<(),&'static str> {
+  let dma=super::xhci::allocate_dma_page()?;
+  unsafe { core::ptr::write_bytes(dma as *mut u8,0,super::xhci::XHCI_PAGE_SIZE as usize); }
+  for c in 0..self.controller_count {
+   if self.controllers[c].object!=controller { continue; }
+   let setup=super::xhci::UsbSetupPacket::get_descriptor(super::usb::USB_DEVICE_DESCRIPTOR_TYPE,0,18);
+   let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,setup,dma,18)?;
+   let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
+   self.transfers[p]=PendingTransfer{
+    valid:true,device:controller,token:token.wrapping_add(2),slot,ring,
+    completion_trb:ring+32,owner_cell,user_buffer:0,dma_buffer:dma,length:18,
+    operation:2,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,
+    bot_direction_in:false,bot_command:0,bot_data_dma:0
+   };
+   return Ok(());
+  }
+  Err("USB controller unavailable")
+ }
+
  pub fn submit(&mut self, request:&super::DeviceRequest)->Result<(),&'static str> {
 
   for u in 0..MAX_DEVICES { if self.usb_devices[u].object==request.device && !request.device.is_null() { let controller=self.usb_devices[u].controller; for c in 0..self.controller_count { if self.controllers[c].object==controller { return match request.opcode { 4=>self.submit_usb_control(c,request,2), 5=>self.submit_usb_set_configuration(c,request), 7=>self.submit_usb_bulk(c,request,true), 8=>self.submit_usb_bulk(c,request,false), _=>Err("unsupported USB device operation") }; } } return Err("USB controller unavailable"); } }
