@@ -5,6 +5,7 @@ pub mod arch;
 pub mod boot_info;
 pub mod memory;
 pub mod model;
+pub mod graphics;
 
 fn arch_user_install(root: u64) -> Result<(), &'static str> {
     arch::x86_64::userspace::install(model::CellId(2), root)
@@ -62,6 +63,12 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         return;
     }
     arch::diagnostics::write_line(5, b"BENNU MEMORY: KERNEL PAGING ONLINE");
+
+    if let Err(_) = graphics::init(boot_info) {
+        arch::diagnostics::write_line(5, b"BENNU VIDEO: NO VBE FRAMEBUFFER");
+    } else {
+        arch::diagnostics::write_line(6, b"BENNU VIDEO: FRAMEBUFFER ONLINE");
+    }
 
     unsafe { memory::heap::init(); }
     arch::diagnostics::write_line(6, b"BENNU MEMORY: KERNEL HEAP ONLINE");
