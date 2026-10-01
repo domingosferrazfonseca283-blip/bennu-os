@@ -76,6 +76,9 @@ struct RegisterFrame {
 
 #[no_mangle]
 extern "C" fn bennu_syscall_yield() {
+    if let Some(cell) = crate::model::scheduler::current_cell() {
+        let _ = crate::model::runtime::finish_cell(cell, crate::model::CellAction::Yield);
+    }
     unsafe {
         if crate::arch::x86_64::execution::switch_back_to_scheduler().is_err() {
             loop { core::hint::spin_loop(); }
