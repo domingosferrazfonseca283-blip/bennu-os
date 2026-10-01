@@ -328,7 +328,8 @@ setup_vbe:
     mov [vbe_best_mode], cx
     mov ax, [VBE_MODE_INFO + 50]
     mov [vbe_best_pitch], ax
-    mov [vbe_best_phys], dword [VBE_MODE_INFO + 40]
+    mov eax, [VBE_MODE_INFO + 40]
+    mov [vbe_best_phys], eax
     mov ax, [VBE_MODE_INFO + 18]
     mov [vbe_best_width], ax
     mov ax, [VBE_MODE_INFO + 20]
