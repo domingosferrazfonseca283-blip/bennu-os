@@ -128,7 +128,7 @@ impl DeviceFabric {
   }
   Err("USB device object not found")
  }
- fn configure_mass_storage_endpoints(&mut self,device:ObjectId,token:u64,owner_cell:u64)->Result<usize,&'static str> {
+ pub fn configure_mass_storage_endpoints(&mut self,device:ObjectId,token:u64,owner_cell:u64)->Result<usize,&'static str> {
   for i in 0..MAX_DEVICES {
    if self.usb_devices[i].object!=device { continue; }
    let transport=self.usb_devices[i].topology.mass_storage_transport();
