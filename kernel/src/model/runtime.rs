@@ -93,6 +93,10 @@ pub fn service_block_io() {
     }
 }
 
+pub fn start_usb_enumeration(owner_cell:u64) -> Result<usize,&'static str> {
+    DEVICE_FABRIC.lock().get_mut().start_usb_enumeration(owner_cell)
+}
+
 pub fn service_device_io() {
     let request = match super::io_fabric::begin_device() { Some(r) => r, None => return };
     let result = DEVICE_FABRIC.lock().get_mut().submit(&request);
