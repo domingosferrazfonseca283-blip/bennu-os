@@ -363,12 +363,23 @@ pub fn handle_event(controller:&mut XhciController,event:XhciEvent)->Option<u8> 
  }
 }
 
+fn publish_command_trb(controller:&mut XhciController,index:usize) {
+ unsafe {
+  let physical=(controller.command_ring_phys as *mut Trb).add(index);
+  core::ptr::write_volatile(physical,controller.command_ring.trbs[index]);
+  let link_cycle=if index==XHCI_RING_TRBS-2 { !controller.command_ring.cycle } else { controller.command_ring.cycle };
+  core::ptr::write_volatile(
+   (controller.command_ring_phys as *mut Trb).add(XHCI_RING_TRBS-1),
+   Trb{parameter:controller.command_ring_phys,status:0,control:TRB_TYPE_LINK|if link_cycle {TRB_CYCLE}else{0}|(1<<1)},
+  );
+ }
+}
+
 pub fn enable_slot_trb()->Trb { Trb{parameter:0,status:0,control:TRB_TYPE_ENABLE_SLOT} }
 pub fn enqueue_enable_slot(controller:&mut XhciController)->Result<u64,&'static str>{
  let index=controller.command_ring.push_with_index(enable_slot_trb())?;
  unsafe {
-  let physical=(controller.command_ring_phys as *mut Trb).add(index);
-  core::ptr::write_volatile(physical,controller.command_ring.trbs[index]);
+  publish_command_trb(controller,index);
   ring_doorbell(controller.mmio_base,controller.capability,0);
  }
  Ok(controller.command_ring_phys + (index as u64)*(core::mem::size_of::<Trb>() as u64) as u64)
