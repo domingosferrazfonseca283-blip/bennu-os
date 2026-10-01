@@ -27,7 +27,7 @@ impl Framebuffer {
         let min_pitch = (boot_info.framebuffer_width as u64)
             .checked_mul(BENNU_FRAMEBUFFER_BYTES_PER_PIXEL as u64)
             .ok_or("framebuffer pitch overflow")?;
-        if boot_info.framebuffer_pitch as u64 < min_pitch {
+        if (boot_info.framebuffer_pitch as u64) < min_pitch {
             return Err("framebuffer pitch is too small");
         }
 
