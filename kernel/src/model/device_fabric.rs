@@ -64,7 +64,7 @@ impl DeviceFabric {
 
 
 impl DeviceFabric {
- pub fn attach_usb_descriptor(&mut self,slot:u8,object:ObjectId,descriptor:UsbDeviceDescriptor)->Result<(), &'static str> {
+ pub fn attach_usb_descriptor(&mut self,slot:u8,controller:ObjectId,object:ObjectId,descriptor:UsbDeviceDescriptor)->Result<(), &'static str> {
   for i in 0..MAX_DEVICES {
    if self.usb_devices[i].state==super::usb::UsbDeviceState::Detached && self.usb_devices[i].object.is_null() {
     self.usb_devices[i]=super::UsbDevice{
@@ -117,7 +117,7 @@ impl DeviceFabric {
       let v=super::UsbInterface{number:core::ptr::read_volatile(p.add(off+2)),alternate:core::ptr::read_volatile(p.add(off+3)),class_code:core::ptr::read_volatile(p.add(off+5)),subclass:core::ptr::read_volatile(p.add(off+6)),protocol:core::ptr::read_volatile(p.add(off+7)),endpoint_count:core::ptr::read_volatile(p.add(off+4))};
       let _=self.usb_devices[i].topology.add_interface(v); current_interface=Some(v);
      } else if typ==super::usb::USB_ENDPOINT_DESCRIPTOR_TYPE && len>=7 {
-      let v=super::UsbEndpointDescriptor{address:core::ptr::read_volatile(p.add(off+2)),attributes:core::ptr::read_volatile(p.add(off+3)),max_packet:(core::ptr::read_volatile(p.add(off+4)) as u16)|((core::ptr::read_volatile(p.add(off+5)) as u16)<<8),interval:core::ptr::read_volatile(p.add(off+6))};
+      let v=super::UsbEndpointDescriptor{address:core::ptr::read_volatile(p.add(off+2)),attributes:core::ptr::read_volatile(p.add(off+3)),max_packet:(core::ptr::read_volatile(p.add(off+4)) as u16)|((core::ptr::read_volatile(p.add(off+5)) as u16)<<8),interval:core::ptr::read_volatile(p.add(off+6)),interface_number:current_interface.map(|v|v.number).unwrap_or(0)};
       let _=self.usb_devices[i].topology.add_endpoint(v);
      }
      off+=len;
@@ -125,6 +125,29 @@ impl DeviceFabric {
     let _=current_interface;
     return Ok(());
    }
+  }
+  Err("USB device object not found")
+ }
+ fn configure_mass_storage_endpoints(&mut self,device:ObjectId,token:u64,owner_cell:u64)->Result<usize,&'static str> {
+  for i in 0..MAX_DEVICES {
+   if self.usb_devices[i].object!=device { continue; }
+   let transport=self.usb_devices[i].topology.mass_storage_transport();
+   if !transport.valid() { return Err("mass-storage bulk endpoints missing"); }
+   let controller=self.usb_devices[i].controller;
+   let slot=self.usb_devices[i].slot;
+   for c in 0..self.controller_count {
+    if self.controllers[c].object!=controller { continue; }
+    let endpoints=[(transport.bulk_out,transport.max_packet_out),(transport.bulk_in,transport.max_packet_in)];
+    let mut count=0usize;
+    for (address,mps) in endpoints {
+     let command_trb=super::xhci::enqueue_configure_endpoint(&mut self.controllers[c],slot,address,mps)?;
+     let pending=(0..MAX_PENDING_COMMANDS).find(|p| !self.pending[*p].valid).ok_or("device command tracking full")?;
+     self.pending[pending]=PendingCommand{valid:true,device,token:token.wrapping_add(count as u64),command_trb,owner_cell,operation:6};
+     count+=1;
+    }
+    return Ok(count);
+   }
+   return Err("USB controller unavailable");
   }
   Err("USB device object not found")
  }
