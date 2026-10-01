@@ -87,6 +87,14 @@ impl DeviceFabric {
        Ok(())
       },
       2 => { let slot=request.value as u8; let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,super::xhci::UsbSetupPacket::get_descriptor(1,0,18),request.buffer,18)?; let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?; self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell}; Ok(()) },
+      3 => {
+       let pending_slot=match (0..MAX_PENDING_COMMANDS).find(|p| !self.pending[*p].valid) { Some(p)=>p, None=>return Err("device command tracking full") };
+       let slot=request.value as u8;
+       let port=(request.flags & 0xff) as u8;
+       let command_trb=super::xhci::enqueue_address_device_for_port(&mut self.controllers[c],slot,port)?;
+       self.pending[pending_slot]=PendingCommand{valid:true,device:request.device,token:request.token,command_trb,owner_cell:request.owner_cell,operation:request.opcode};
+       Ok(())
+      },
       _ => Err("unsupported xHCI device operation"),
      };
     }
