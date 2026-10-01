@@ -87,11 +87,11 @@ impl DeviceFabric {
   let length=(if descriptor_type==1 {18} else {request.length as usize}).min(4096);
   if length==0 { return Err("USB transfer length is zero"); }
   let dma=crate::memory::allocate_frame_below(super::xhci::XHCI_DMA_LIMIT).ok_or("USB transfer DMA buffer allocation failed")?;
-  unsafe { core::ptr::write_bytes(dma as *mut u8,0,crate::memory::PAGE_SIZE); }
+  unsafe { core::ptr::write_bytes(dma as *mut u8,0,crate::memory::PAGE_SIZE as usize); }
   let setup=super::xhci::UsbSetupPacket::get_descriptor(descriptor_type,0,length as u16);
   let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,setup,dma,length as u16)?;
   let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
-  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0,bot_data_dma:0};
+  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode as u8,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0,bot_data_dma:0};
   Ok(())
  }
  fn parse_configuration(&mut self,device:ObjectId,dma:u64,length:u64)->Result<(),&'static str> {
@@ -283,7 +283,7 @@ impl DeviceFabric {
   if configuration==0 { return Err("USB configuration value missing"); }
   let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,super::xhci::UsbSetupPacket::set_configuration(configuration),0,0)?;
   let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
-  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+16,owner_cell:request.owner_cell,user_buffer:0,dma_buffer:0,length:0,operation:request.opcode,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0,bot_data_dma:0};
+  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+16,owner_cell:request.owner_cell,user_buffer:0,dma_buffer:0,length:0,operation:request.opcode as u8,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0,bot_data_dma:0};
   Ok(())
  }
  fn submit_usb_bulk(&mut self,c:usize,request:&super::DeviceRequest,in_direction:bool)->Result<(),&'static str> {
@@ -325,7 +325,7 @@ impl DeviceFabric {
        let command_trb=super::xhci::enqueue_enable_slot(&mut self.controllers[c])?;
        self.pending[pending_slot]=PendingCommand{
         valid:true,device:request.device,token:request.token,command_trb,
-        owner_cell:request.owner_cell,operation:request.opcode
+        owner_cell:request.owner_cell,operation:request.opcode as u8
        };
        Ok(())
       },
@@ -335,7 +335,7 @@ impl DeviceFabric {
        let slot=request.value as u8;
        let port=(request.flags & 0xff) as u8;
        let command_trb=super::xhci::enqueue_address_device_for_port(&mut self.controllers[c],slot,port)?;
-       self.pending[pending_slot]=PendingCommand{valid:true,device:request.device,token:request.token,command_trb,owner_cell:request.owner_cell,operation:request.opcode};
+       self.pending[pending_slot]=PendingCommand{valid:true,device:request.device,token:request.token,command_trb,owner_cell:request.owner_cell,operation:request.opcode as u8};
        Ok(())
       },
       _ => Err("unsupported xHCI device operation"),
