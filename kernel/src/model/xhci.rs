@@ -418,6 +418,15 @@ pub fn prepare_address_device_context(
  Ok((input,device))
 }
 
+pub fn enqueue_address_device_for_port(controller:&mut XhciController,slot:u8,port:u8)->Result<u64,&'static str> {
+ if port==0 || port as usize>controller.ports as usize { return Err("invalid xHCI root port"); }
+ let speed=(controller.ports_state[(port-1) as usize].status & PORTSC_SPEED_MASK) as u8;
+ if speed==0 { return Err("USB port speed unavailable"); }
+ let (input,_device)=prepare_address_device_context(controller,slot,port,speed)?;
+ enqueue_address_device(controller,slot,input)
+}
+
+
 pub fn data_stage_trb(buffer:u64,length:u32,in_direction:bool,chain:bool)->Trb {
  let mut control=TRB_TYPE_DATA_STAGE | if in_direction { TRB_DIR_IN } else { 0 } | TRB_IOC;
  if chain { control|=TRB_CHAIN; }
@@ -455,7 +464,7 @@ pub fn enqueue_control_transfer(
 )->Result<u64,&'static str> {
  if slot==0 || slot as usize>=XHCI_MAX_SLOTS { return Err("invalid xHCI slot"); }
  if controller.mmio_base==0 || controller.event_ring_phys==0 { return Err("xHCI controller is not running"); }
- let ring=allocate_dma_page()?;
+ let ring=if controller.slot_transfer_ring[slot as usize]!=0 { controller.slot_transfer_ring[slot as usize] } else { let r=allocate_dma_page()?; controller.slot_transfer_ring[slot as usize]=r; r };
  unsafe {
   core::ptr::write_bytes(ring as *mut u8,0,XHCI_PAGE_SIZE as usize);
   let (setup_trb,data_trb,status_trb)=control_transfer_trbs(setup,data_buffer,data_length);
