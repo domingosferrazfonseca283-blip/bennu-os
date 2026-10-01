@@ -256,7 +256,8 @@ impl FreeMap {
     pub const fn allocate(&mut self, count: u64) -> Option<u64> {
         if count == 0 || count > self.blocks { return None; }
         let start = self.first;
-        self.first = self.first.checked_add(count)?;
+        let next = match self.first.checked_add(count) { Some(v) => v, None => return None };
+        self.first = next;
         self.blocks -= count;
         Some(start)
     }
