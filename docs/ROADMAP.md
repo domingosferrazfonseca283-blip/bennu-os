@@ -62,7 +62,7 @@
 - [x] enumeração USB: eventos, Enable Slot, Address Device e control-transfer primitives
 - [x] topologia USB: interfaces/endpoints e identificação Bulk-Only Mass Storage
 - [x] USB Mass Storage: CBW/CSW e comandos SCSI base
-- [ ] ligação física completa entre TRBs DMA e dispositivos USB
+- [x] ligação física dos TRBs de comando/transferência à memória DMA e doorbells xHCI
 - [x] consumo da fila DeviceRequest pelo Device Fabric/xHCI
 - [x] Device Fabric persistente no runtime
 - [x] confirmação de DeviceRequest pelo Event Ring xHCI
