@@ -5,7 +5,6 @@ STAGE1=build/stage1.bin
 STAGE2=build/stage2.bin
 IMAGE=build/bennu.img
 MAX_EARLY_KERNEL_SECTORS=120
-KERNEL_ELF = $(shell find kernel/target -type f -path '*/release/bennu-kernel' -print -quit)
 
 .PHONY: all image clean
 
@@ -14,9 +13,9 @@ all: image
 image:
 	mkdir -p build
 	RUSTFLAGS="-C link-arg=-T$(CURDIR)/kernel/linker.ld" cargo build --manifest-path kernel/Cargo.toml --target $(KERNEL_TARGET) --release -Zbuild-std=core,compiler_builtins -Zbuild-std-features=compiler-builtins-mem -Zjson-target-spec
-	test -n "$(KERNEL_ELF)" || exit 1; \
-	llvm-objcopy -O binary "$(KERNEL_ELF)" $(KERNEL_BIN)
-	@KERNEL_BYTES=$$(wc -c < $(KERNEL_BIN)); \
+	KERNEL_ELF=$$(find kernel/target -type f -path '*/release/bennu-kernel' -print -quit); \
+	test -n "$$KERNEL_ELF" || exit 1; \
+	llvm-objcopy -O binary "$$KERNEL_ELF" $(KERNEL_BIN)
 	KERNEL_SECTORS=$$(( (KERNEL_BYTES + 511) / 512 )); \
 	if [ $$KERNEL_SECTORS -gt $(MAX_EARLY_KERNEL_SECTORS) ]; then \
 		echo "error: kernel is $$KERNEL_SECTORS sectors; early BIOS loader supports at most $(MAX_EARLY_KERNEL_SECTORS)"; \
