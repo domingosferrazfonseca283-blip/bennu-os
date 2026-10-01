@@ -360,7 +360,7 @@ pub fn enqueue_enable_slot(controller:&mut XhciController)->Result<u64,&'static 
   core::ptr::write_volatile(physical,controller.command_ring.trbs[index]);
   ring_doorbell(controller.mmio_base,controller.capability,0);
  }
- Ok(controller.command_ring_phys + (index as u64)*core::mem::size_of::<Trb>() as u64)
+ Ok(controller.command_ring_phys + (index as u64)*(core::mem::size_of::<Trb>() as u64) as u64)
 }
 pub fn enqueue_address_device(controller:&mut XhciController,input_context:u64,slot:u8)->Result<u64,&'static str>{
  let index=controller.command_ring.push_with_index(address_device_trb(input_context,slot))?;
@@ -531,7 +531,7 @@ pub fn enqueue_address_device_for_port(controller:&mut XhciController,slot:u8,po
  let speed=(controller.ports_state[(port-1) as usize].status & PORTSC_SPEED_MASK) as u8;
  if speed==0 { return Err("USB port speed unavailable"); }
  let (input,_device)=prepare_address_device_context(controller,slot,port,speed)?;
- enqueue_address_device(controller,slot,input)
+ enqueue_address_device(controller,input,slot)
 }
 
 
