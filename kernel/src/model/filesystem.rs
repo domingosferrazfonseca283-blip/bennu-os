@@ -236,3 +236,75 @@ pub const fn block_range(superblock: &Superblock, first: u64, count: u64) -> Opt
     if first < superblock.metadata_blocks || end > superblock.total_blocks { return None; }
     Some((first, end))
 }
+
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FreeMap {
+    pub first: u64,
+    pub blocks: u64,
+}
+impl FreeMap {
+    pub const EMPTY: Self = Self { first: 0, blocks: 0 };
+    pub const fn new(superblock: &Superblock) -> Option<Self> {
+        if !superblock.valid() || superblock.free_blocks == 0 { return None; }
+        Some(Self { first: superblock.metadata_blocks, blocks: superblock.free_blocks })
+    }
+    pub const fn contains(&self, block: u64) -> bool {
+        block >= self.first && block < self.first.saturating_add(self.blocks)
+    }
+    pub const fn allocate(&mut self, count: u64) -> Option<u64> {
+        if count == 0 || count > self.blocks { return None; }
+        let start = self.first;
+        self.first = self.first.checked_add(count)?;
+        self.blocks -= count;
+        Some(start)
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct JournalTransaction {
+    pub sequence: u64,
+    pub start: u64,
+    pub records: u32,
+    pub committed: bool,
+}
+impl JournalTransaction {
+    pub const EMPTY: Self = Self { sequence: 0, start: 0, records: 0, committed: false };
+    pub const fn begin(superblock: &Superblock) -> Option<Self> {
+        if !superblock.valid() { return None; }
+        Some(Self { sequence: superblock.sequence + 1, start: 0, records: 0, committed: false })
+    }
+    pub fn append(&mut self, record: &JournalRecord) -> Result<(), &'static str> {
+        if self.sequence == 0 || record.sequence != self.sequence { return Err("journal sequence mismatch"); }
+        if self.records == u32::MAX { return Err("journal transaction full"); }
+        self.records += 1;
+        Ok(())
+    }
+    pub fn commit(&mut self) -> Result<(), &'static str> {
+        if self.sequence == 0 || self.records == 0 { return Err("empty journal transaction"); }
+        self.committed = true;
+        Ok(())
+    }
+}
+
+pub fn format_block_device(total_blocks: u64, root_object: ObjectId, out: &mut [u8]) -> Option<Superblock> {
+    let sb = Superblock::format(total_blocks, BENNUFS_DEFAULT_JOURNAL_BLOCKS, root_object)?;
+    if out.len() < BENNUFS_BLOCK_SIZE as usize { return None; }
+    let mut i = 0;
+    while i < BENNUFS_BLOCK_SIZE as usize { out[i] = 0; i += 1; }
+    if !serialize_superblock(&sb, out) { return None; }
+    Some(sb)
+}
+
+pub fn recover_journal(superblock: &Superblock, records: &[JournalRecord]) -> u64 {
+    if !superblock.valid() { return 0; }
+    let mut highest = superblock.sequence;
+    for record in records {
+        if record.valid_for(superblock) && record.sequence > highest {
+            highest = record.sequence;
+        }
+    }
+    highest
+}
