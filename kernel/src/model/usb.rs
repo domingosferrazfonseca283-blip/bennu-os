@@ -24,6 +24,7 @@ impl UsbConfiguration { pub const EMPTY:Self=Self{configuration:0,interfaces:0,m
 #[derive(Clone,Copy)]
 pub struct UsbDevice {
  pub object:super::ObjectId,
+ pub controller:super::ObjectId,
  pub descriptor:UsbDeviceDescriptor,
  pub configuration:UsbConfiguration,
  pub topology:UsbDeviceTopology,
@@ -33,7 +34,7 @@ pub struct UsbDevice {
  pub configured:bool,
 }
 impl UsbDevice {
- pub const EMPTY:Self=Self{object:super::ObjectId::NULL,descriptor:UsbDeviceDescriptor::EMPTY,configuration:UsbConfiguration::EMPTY,topology:UsbDeviceTopology::EMPTY,slot:0,port:0,state:UsbDeviceState::Detached,configured:false};
+ pub const EMPTY:Self=Self{object:super::ObjectId::NULL,controller:super::ObjectId::NULL,descriptor:UsbDeviceDescriptor::EMPTY,configuration:UsbConfiguration::EMPTY,topology:UsbDeviceTopology::EMPTY,slot:0,port:0,state:UsbDeviceState::Detached,configured:false};
  pub const fn is_mass_storage(&self)->bool {
   self.descriptor.class_code==8
  }
