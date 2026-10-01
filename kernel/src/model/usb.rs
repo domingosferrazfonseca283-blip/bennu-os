@@ -155,16 +155,8 @@ impl UsbDeviceTopology {
  }
 }
 
-#[repr(C)]
-#[derive(Clone,Copy)]
 pub const USB_BOT_CBW_LENGTH:usize=31;
 pub const USB_BOT_CSW_LENGTH:usize=13;
-
-#[repr(C)]
-#[derive(Clone,Copy)]
-pub struct UsbMassStorageEndpoints {
- pub bulk_in:u8,pub bulk_out:u8,pub max_packet_in:u16,pub max_packet_out:u16,
-}
 
 #[repr(C)]
 #[derive(Clone,Copy)]
