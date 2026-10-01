@@ -141,6 +141,7 @@ pub struct XhciController {
  pub slot_transfer_cycle:[bool;XHCI_MAX_SLOTS],
  pub endpoint_transfer_ring:[[u64;32];XHCI_MAX_SLOTS],
  pub endpoint_transfer_enqueue:[[u16;32];XHCI_MAX_SLOTS],
+ pub endpoint_transfer_dequeue:[[u16;32];XHCI_MAX_SLOTS],
  pub endpoint_transfer_cycle:[[bool;32];XHCI_MAX_SLOTS],
 }
 impl XhciController {
@@ -156,6 +157,7 @@ impl XhciController {
   slot_transfer_cycle:[true;XHCI_MAX_SLOTS],
   endpoint_transfer_ring:[[0;32];XHCI_MAX_SLOTS],
   endpoint_transfer_enqueue:[[0;32];XHCI_MAX_SLOTS],
+  endpoint_transfer_dequeue:[[0;32];XHCI_MAX_SLOTS],
   endpoint_transfer_cycle:[[true;32];XHCI_MAX_SLOTS],
   ports_state:[XhciPort::empty(0);XHCI_MAX_PORTS],
   capability:CapabilityRegisters{cap_length:0,version:0,hcs_params1:0,hcs_params2:0,hcs_params3:0,hcc_params1:0,dboff:0,rtsoff:0,hcc_params2:0},
@@ -480,7 +482,7 @@ pub fn enqueue_bulk_transfer(
  let cycle=controller.endpoint_transfer_cycle[slot as usize][key];
  let next=index+1;
  let next=(if next>=XHCI_RING_TRBS-1 {0}else{next}) as u16;
- if next as usize==controller.endpoint_transfer_enqueue[slot as usize][key] { return Err("bulk transfer ring full"); }
+ if next==controller.endpoint_transfer_dequeue[slot as usize][key] { return Err("bulk transfer ring full"); }
  unsafe {
   let trb=normal_trb(buffer,length,endpoint_address&0x80!=0).with_cycle(cycle);
   core::ptr::write_volatile((ring as *mut Trb).add(index),trb);
@@ -516,7 +518,7 @@ pub fn allocate_dma_page()->Result<u64,&'static str> {
 }
 
 pub fn prepare_address_device_context(
- controller:&XhciController,
+ controller:&mut XhciController,
  slot:u8,
  port:u8,
  speed:u8,
