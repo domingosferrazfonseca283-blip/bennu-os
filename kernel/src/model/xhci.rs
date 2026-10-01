@@ -369,7 +369,7 @@ pub fn enqueue_address_device(controller:&mut XhciController,input_context:u64,s
   core::ptr::write_volatile(physical,controller.command_ring.trbs[index]);
   ring_doorbell(controller.mmio_base,controller.capability,0);
  }
- Ok(controller.command_ring_phys + (index as u64)*core::mem::size_of::<Trb>() as u64)
+ Ok(controller.command_ring_phys + (index as u64)*(core::mem::size_of::<Trb>() as u64) as u64)
 }
 
 pub fn address_device_trb(input_context:u64,slot:u8)->Trb {
