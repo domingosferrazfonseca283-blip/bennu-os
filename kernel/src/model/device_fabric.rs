@@ -154,7 +154,8 @@ impl DeviceFabric {
     user_buffer,dma_buffer:dma,length:super::usb::USB_BOT_CBW_LENGTH as u64,
     operation:9,phase:1,endpoint:transport.bulk_out,bot_tag:cbw.tag,
     bot_transfer_length:cbw.transfer_length.min(super::xhci::XHCI_PAGE_SIZE as u32),
-    bot_direction_in:cbw.flags&0x80!=0,bot_command:command.bytes[0],bot_data_dma:0,;
+    bot_direction_in:cbw.flags&0x80!=0,bot_command:command.bytes[0],bot_data_dma:0,
+   };
    return Ok(());
   }
   Err("mass-storage controller unavailable")
