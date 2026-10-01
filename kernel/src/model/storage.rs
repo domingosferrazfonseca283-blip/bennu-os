@@ -67,3 +67,41 @@ pub const fn lba_byte_range(geometry:BlockGeometry,lba:u64,blocks:u32)->Option<(
     let length=(blocks as u64).checked_mul(geometry.block_size as u64)?;
     Some((offset,length))
 }
+
+
+#[repr(u8)]
+#[derive(Clone,Copy,PartialEq,Eq)]
+pub enum ScsiOpcode { TestUnitReady=0x00, Inquiry=0x12, ReadCapacity10=0x25, Read10=0x28, Write10=0x2a }
+
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct ScsiBlockCommand {
+ pub command: super::ScsiCommand,
+ pub lba:u64,
+ pub blocks:u32,
+ pub direction_in:bool,
+}
+impl ScsiBlockCommand {
+ pub const fn inquiry() -> Self {
+  Self{command:super::ScsiCommand::inquiry(36),lba:0,blocks:0,direction_in:true}
+ }
+ pub const fn test_unit_ready() -> Self {
+  Self{command:super::ScsiCommand::test_unit_ready(),lba:0,blocks:0,direction_in:false}
+ }
+ pub const fn read_capacity10() -> Self {
+  Self{command:super::ScsiCommand::read_capacity10(),lba:0,blocks:0,direction_in:true}
+ }
+ pub const fn read10(lba:u64,blocks:u32) -> Option<Self> {
+  if lba>0xffff_ffff || blocks==0 || blocks>0xffff { return None; }
+  Some(Self{command:super::ScsiCommand::read10(lba as u32,blocks as u16),lba,blocks,direction_in:true})
+ }
+ pub const fn write10(lba:u64,blocks:u32) -> Option<Self> {
+  if lba>0xffff_ffff || blocks==0 || blocks>0xffff { return None; }
+  Some(Self{command:super::ScsiCommand::write10(lba as u32,blocks as u16),lba,blocks,direction_in:false})
+ }
+ pub const fn transfer_bytes(&self,geometry:BlockGeometry)->Option<u64> {
+  if self.blocks==0 { return Some(0); }
+  let range=lba_byte_range(geometry,self.lba,self.blocks)?;
+  Some(range.1)
+ }
+}
