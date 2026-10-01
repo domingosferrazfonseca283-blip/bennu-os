@@ -69,7 +69,9 @@
 - [x] completions tipadas de DeviceRequest no Event Fabric
 - [x] tracking persistente de Transfer Ring por slot
 - [x] buffer DMA nativo para GET_DESCRIPTOR sem expor VA USER ao hardware
-- [ ] persistência do descritor USB e estado Addressed/Configured
+- [x] persistência do Device Descriptor como UsbDevice/Object
+- [x] estado USB explícito Detached/Default/Addressed/Configured
+- [ ] SET_ADDRESS/SET_CONFIGURATION end-to-end
 - [ ] SET_ADDRESS/SET_CONFIGURATION end-to-end
 - [ ] fila de requests de bloco assíncrona
 - [ ] BennuFS
