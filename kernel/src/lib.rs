@@ -134,6 +134,16 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
                             let start = if dma.is_ok() { unsafe { model::xhci::start_controller(&mut controller, cap) } } else { Err("DMA setup failed") };
                             if start.is_ok() && model::runtime::register_xhci_controller(controller).is_ok() {
                                 arch::diagnostics::write_line(6, b"BENNU USB: xHCI DMA + RINGS ONLINE");
+                                match model::runtime::start_usb_enumeration(1) {
+                                    Ok(count) => {
+                                        if count != 0 {
+                                            arch::diagnostics::write_line(6, b"BENNU USB: ENUMERATION QUEUED");
+                                        } else {
+                                            arch::diagnostics::write_line(6, b"BENNU USB: NO DEVICE ON ROOT PORTS");
+                                        }
+                                    }
+                                    Err(_) => arch::diagnostics::write_line(5, b"BENNU USB: ENUMERATION START FAILED"),
+                                }
                             } else {
                                 arch::diagnostics::write_line(5, b"BENNU USB: xHCI DMA/START FAILED");
                             }
