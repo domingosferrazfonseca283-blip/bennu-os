@@ -64,6 +64,19 @@ impl DeviceFabric {
 
 
 impl DeviceFabric {
+ pub fn attach_usb_descriptor(&mut self,slot:u8,object:ObjectId,descriptor:UsbDeviceDescriptor)->Result<(), &'static str> {
+  for i in 0..MAX_DEVICES {
+   if self.usb_devices[i].state==super::usb::UsbDeviceState::Detached && self.usb_devices[i].object.is_null() {
+    self.usb_devices[i]=super::UsbDevice{
+     object,descriptor,configuration:super::UsbConfiguration::EMPTY,
+     topology:super::UsbDeviceTopology::EMPTY,slot,port:0,
+     state:super::usb::UsbDeviceState::Default,configured:false,
+    };
+    return Ok(());
+   }
+  }
+  Err("USB device table full")
+ }
  pub fn contains(&self, object:ObjectId)->bool {
   for i in 0..self.device_count { if self.devices[i].descriptor.object==object { return true; } }
   false
