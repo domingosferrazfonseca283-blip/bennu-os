@@ -46,6 +46,7 @@ pub fn register_xhci_controller(controller: super::XhciController) -> Result<(),
 
 pub fn service_block_io() {
     let envelope = match super::io_fabric::begin_next() { Some(v) => v, None => return };
+    let target = cell_root_object(CellId(envelope.request.owner_cell as u32));
     let mut device = super::BlockDevice::EMPTY;
     {
         let guard = RUNTIME.lock();
@@ -61,7 +62,7 @@ pub fn service_block_io() {
         let _ = emit(super::Event::new(
             super::EventKind::DeviceTransferCompleted,
             envelope.request.device,
-            super::ObjectId::NULL,
+            target,
             ((super::IoStatus::NoDevice as u64) << 56) | (envelope.request.token & 0x00ff_ffff_ffff_ffff),
         ));
         return;
@@ -70,7 +71,7 @@ pub fn service_block_io() {
         let _ = emit(super::Event::new(
             super::EventKind::DeviceTransferCompleted,
             envelope.request.device,
-            super::ObjectId::NULL,
+            target,
             ((super::IoStatus::Invalid as u64) << 56) | (envelope.request.token & 0x00ff_ffff_ffff_ffff),
         ));
         return;
@@ -80,14 +81,14 @@ pub fn service_block_io() {
         let _ = emit(super::Event::new(
             super::EventKind::DeviceTransferCompleted,
             envelope.request.device,
-            super::ObjectId::NULL,
+            target,
             ((super::IoStatus::Hardware as u64) << 56) | (envelope.request.token & 0x00ff_ffff_ffff_ffff),
         ));
     } else {
         let _ = emit(super::Event::new(
             super::EventKind::DeviceQueued,
             envelope.request.device,
-            super::ObjectId::NULL,
+            target,
             envelope.request.token,
         ));
     }
@@ -99,9 +100,10 @@ pub fn start_usb_enumeration(owner_cell:u64) -> Result<usize,&'static str> {
 
 pub fn service_device_io() {
     let request = match super::io_fabric::begin_device() { Some(r) => r, None => return };
+    let target = cell_root_object(CellId(request.owner_cell as u32));
     let result = DEVICE_FABRIC.lock().get_mut().submit(&request);
     let kind = if result.is_ok() { super::EventKind::DeviceQueued } else { super::EventKind::ResourceChanged };
-    let _ = emit(super::Event::new(kind, request.device, super::ObjectId::NULL, request.token));
+    let _ = emit(super::Event::new(kind, request.device, target, request.token));
 }
 
 pub fn service_device_events() {
@@ -161,6 +163,7 @@ pub fn service_device_events() {
                 }
             }
         }
+        let target = cell_root_object(CellId(owner_cell as u32));
         let kind = if operation == 2 {
             super::EventKind::DeviceTransferCompleted
         } else {
@@ -171,7 +174,7 @@ pub fn service_device_events() {
             | ((owner_cell & 0xffff) << 32)
             | (token & 0xffff_ffff);
         let source = if published.is_null() { device } else { published };
-        let _ = emit(super::Event::new(kind, source, super::ObjectId::NULL, value));
+        let _ = emit(super::Event::new(kind, source, target, value));
     }
 }
 
@@ -621,6 +624,17 @@ pub fn poll() -> Option<Event> {
 pub fn object_exists(id: ObjectId) -> bool {
     let guard = RUNTIME.lock();
     object_exists_unlocked(guard.get(), id)
+}
+
+pub fn cell_root_object(id: CellId) -> ObjectId {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    let index = id.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
+        ObjectId::NULL
+    } else {
+        state.cells[index].root
+    }
 }
 
 pub fn cell_state(id: CellId) -> Option<CellState> {
