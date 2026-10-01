@@ -76,7 +76,7 @@
 - [ ] Bulk Transfer Rings persistentes
 - [ ] SET_ADDRESS / enumeration end-to-end
 - [ ] SET_ADDRESS/SET_CONFIGURATION end-to-end
-- [ ] fila de requests de bloco assíncrona
+- [x] fila de requests de bloco assíncrona
 - [ ] BennuFS
 - [ ] journaling/recuperação
 - [ ] relógio e temporizadores
