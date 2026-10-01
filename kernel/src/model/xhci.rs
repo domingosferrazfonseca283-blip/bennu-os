@@ -447,7 +447,7 @@ pub fn enqueue_configure_endpoint(
   core::ptr::write_volatile(physical,controller.command_ring.trbs[index]);
   ring_doorbell(controller.mmio_base,controller.capability,0);
  }
- Ok(controller.command_ring_phys+(index as u64)*core::mem::size_of::<Trb>())
+ Ok(controller.command_ring_phys+(index as u64)*(core::mem::size_of::<Trb>() as u64))
 }
 
 pub fn normal_trb(buffer:u64,length:u32,in_direction:bool)->Trb {
