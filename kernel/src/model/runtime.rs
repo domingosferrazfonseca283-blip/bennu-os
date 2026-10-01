@@ -51,13 +51,17 @@ pub fn service_device_io() {
 
 pub fn service_device_events() {
     let completion = DEVICE_FABRIC.lock().get_mut().service_events();
-    if let Some((device, token, _slot, completion_code)) = completion {
-        let _ = emit(super::Event::new(
-            super::EventKind::DeviceCompleted,
-            device,
-            super::ObjectId::NULL,
-            ((completion_code as u64) << 56) | (token & 0x00ff_ffff_ffff_ffff),
-        ));
+    if let Some((device, token, slot, completion_code, operation, owner_cell)) = completion {
+        let kind = if operation == 2 {
+            super::EventKind::DeviceTransferCompleted
+        } else {
+            super::EventKind::DeviceCommandCompleted
+        };
+        let value = ((completion_code as u64) << 56)
+            | ((slot as u64) << 48)
+            | ((owner_cell & 0xffff) << 32)
+            | (token & 0xffff_ffff);
+        let _ = emit(super::Event::new(kind, device, super::ObjectId::NULL, value));
     }
 }
 
@@ -415,6 +419,7 @@ pub fn device_submit(
     }
     drop(guard);
     super::io_fabric::submit_device(super::DeviceRequest {
+        owner_cell: cell.0 as u64,
         device: object, opcode, flags, argument, value, buffer, length, token,
     })
 }
