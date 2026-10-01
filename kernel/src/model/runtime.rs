@@ -51,7 +51,17 @@ pub fn service_device_io() {
 
 pub fn service_device_events() {
     let completion = DEVICE_FABRIC.lock().get_mut().service_events();
-    if let Some((device, token, slot, completion_code, operation, owner_cell)) = completion {
+    if let Some((device, token, slot, completion_code, operation, owner_cell, descriptor)) = completion {
+        let mut published = super::ObjectId::NULL;
+        if operation == 2 {
+            if let Some(desc) = descriptor {
+                if let Ok(object) = create_object(super::ObjectKind::Device, owner_cell as u32) {
+                    if DEVICE_FABRIC.lock().get_mut().attach_usb_descriptor(slot, object, desc).is_ok() {
+                        published = object;
+                    }
+                }
+            }
+        }
         let kind = if operation == 2 {
             super::EventKind::DeviceTransferCompleted
         } else {
@@ -61,7 +71,8 @@ pub fn service_device_events() {
             | ((slot as u64) << 48)
             | ((owner_cell & 0xffff) << 32)
             | (token & 0xffff_ffff);
-        let _ = emit(super::Event::new(kind, device, super::ObjectId::NULL, value));
+        let source = if published.is_null() { device } else { published };
+        let _ = emit(super::Event::new(kind, source, super::ObjectId::NULL, value));
     }
 }
 
