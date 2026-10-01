@@ -525,9 +525,16 @@ pub fn prepare_address_device_context(
  if port==0 || port as usize>controller.ports as usize { return Err("invalid xHCI root port"); }
  let input=allocate_dma_page()?;
  let device=allocate_dma_page()?;
+ let ep0_ring=allocate_dma_page()?;
+ controller.slot_transfer_ring[slot as usize]=ep0_ring;
  unsafe {
   core::ptr::write_bytes(input as *mut u8,0,XHCI_PAGE_SIZE as usize);
   core::ptr::write_bytes(device as *mut u8,0,XHCI_PAGE_SIZE as usize);
+  core::ptr::write_bytes(ep0_ring as *mut u8,0,XHCI_PAGE_SIZE as usize);
+  core::ptr::write_volatile(
+   (ep0_ring as *mut Trb).add(XHCI_RING_TRBS-1),
+   Trb{parameter:ep0_ring,status:0,control:TRB_TYPE_LINK|TRB_CYCLE|(1<<1)},
+  );
   // Input Control Context: A0 selects Slot Context, A1 selects EP0.
   core::ptr::write_volatile((input as *mut u32).add(1),0x3);
   let ctx=controller.capability.context_size() as usize;
@@ -537,10 +544,13 @@ pub fn prepare_address_device_context(
   core::ptr::write_volatile(slot_ctx,((speed as u32)&0xF)<<20 | 1<<27);
   // Slot Context DW1: root hub port number.
   core::ptr::write_volatile(slot_ctx.add(1),(port as u32)<<16);
-  // EP0 Context DW1: endpoint type/control transfer + max packet size.
-  // The initial packet size is selected conservatively by USB speed.
+  // EP0 Context DW1: control endpoint + maximum packet size.
   let max_packet=CapabilityRegisters::ep0_max_packet(speed);
   core::ptr::write_volatile(ep0_ctx.add(1),4<<3 | max_packet<<16);
+  // EP0 Context TR Dequeue Pointer and DCS.
+  core::ptr::write_volatile(ep0_ctx.add(2),(ep0_ring as u32)|1);
+  core::ptr::write_volatile(ep0_ctx.add(3),(ep0_ring>>32) as u32);
+  core::ptr::write_volatile(ep0_ctx.add(4),8);
   // Device Context Base Address Array entry for this slot.
   core::ptr::write_volatile((controller.dcbaa_phys as *mut u64).add(slot as usize),device);
  }
