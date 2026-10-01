@@ -140,10 +140,12 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
         Operation::DeviceSubmit => {
             let opcode = (call.flags as u32) & 0x00ff;
             let flags = ((call.flags as u32) >> 8) & 0x00ff;
-            let token = call.value;
+            let packed = call.value;
+            let token = packed & 0x00ff_ffff_ffff_ffff;
+            let value = (packed >> 56) & 0xff;
             match super::runtime::device_submit(
                 cell, call.capability, call.object, opcode, flags,
-                0, 0, call.argument, call.length, token,
+                0, value, call.argument, call.length, token,
             ) {
                 Ok(()) => ResultCode::OK,
                 Err(_) => ResultCode::error(ABI_STATUS_DENIED),
