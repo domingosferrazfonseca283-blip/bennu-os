@@ -91,7 +91,7 @@ impl DeviceFabric {
   let setup=super::xhci::UsbSetupPacket::get_descriptor(descriptor_type,0,length as u16);
   let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,setup,dma,length as u16)?;
   let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
-  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode};
+  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode,phase:0,endpoint:0};
   Ok(())
  }
  fn parse_configuration(&mut self,device:ObjectId,dma:u64,length:u64)->Result<(),&'static str> {
@@ -161,7 +161,7 @@ impl DeviceFabric {
   if configuration==0 { return Err("USB configuration value missing"); }
   let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,super::xhci::UsbSetupPacket::set_configuration(configuration),0,0)?;
   let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
-  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+16,owner_cell:request.owner_cell,user_buffer:0,dma_buffer:0,length:0,operation:request.opcode};
+  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+16,owner_cell:request.owner_cell,user_buffer:0,dma_buffer:0,length:0,operation:request.opcode,phase:0,endpoint:0};
   Ok(())
  }
  fn submit_usb_bulk(&mut self,c:usize,request:&super::DeviceRequest,in_direction:bool)->Result<(),&'static str> {
