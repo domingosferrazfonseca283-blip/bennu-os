@@ -12,6 +12,8 @@ pub const TRB_TYPE_CMD_COMPLETION:u32=33<<10;
 pub const TRB_TYPE_PORT_STATUS:u32=34<<10;
 pub const TRB_TYPE_ENABLE_SLOT:u32=9<<10;
 pub const TRB_TYPE_ADDRESS_DEVICE:u32=11<<10;
+pub const TRB_TYPE_CONFIGURE_ENDPOINT:u32=12<<10;
+pub const TRB_TYPE_NORMAL:u32=1<<10;
 pub const TRB_TYPE_SETUP_STAGE:u32=2<<10;
 pub const TRB_TYPE_DATA_STAGE:u32=3<<10;
 pub const TRB_TYPE_STATUS_STAGE:u32=4<<10;
@@ -21,6 +23,8 @@ pub const TRB_CHAIN:u32=1<<4;
 pub const TRB_IOC:u32=1<<5;
 pub const TRB_IDT:u32=1<<6;
 pub const TRB_DIR_IN:u32=1<<16;
+pub const EP_TYPE_BULK_OUT:u32=2;
+pub const EP_TYPE_BULK_IN:u32=6;
 pub const SETUP_TRANSFER_NO_DATA:u32=0<<16;
 pub const SETUP_TRANSFER_OUT:u32=2<<16;
 pub const SETUP_TRANSFER_IN:u32=3<<16;
@@ -133,6 +137,7 @@ pub struct XhciController {
  pub event_dequeue:usize,
  pub event_cycle:bool,
  pub slot_transfer_ring:[u64;XHCI_MAX_SLOTS],
+ pub endpoint_transfer_ring:[[u64;32];XHCI_MAX_SLOTS],
 }
 impl XhciController {
  pub const EMPTY:Self=Self{
@@ -143,6 +148,7 @@ impl XhciController {
   event_dequeue:0,
   event_cycle:true,
   slot_transfer_ring:[0;XHCI_MAX_SLOTS],
+  endpoint_transfer_ring:[[0;32];XHCI_MAX_SLOTS],
   ports_state:[XhciPort::empty(0);XHCI_MAX_PORTS],
   capability:CapabilityRegisters{cap_length:0,version:0,hcs_params1:0,hcs_params2:0,hcs_params3:0,hcc_params1:0,dboff:0,rtsoff:0,hcc_params2:0},
  };
@@ -368,6 +374,107 @@ pub fn enqueue_address_device(controller:&mut XhciController,input_context:u64,s
 
 pub fn address_device_trb(input_context:u64,slot:u8)->Trb {
  Trb{parameter:input_context,status:0,control:TRB_TYPE_ADDRESS_DEVICE|((slot as u32)<<24)}
+}
+
+pub fn configure_endpoint_trb(input_context:u64,slot:u8,deconfigure:bool)->Trb {
+ let mut control=TRB_TYPE_CONFIGURE_ENDPOINT|((slot as u32)<<24);
+ if deconfigure { control|=1<<9; }
+ Trb{parameter:input_context,status:0,control}
+}
+
+pub fn endpoint_context_index(address:u8)->usize {
+ let number=(address&0x0f) as usize;
+ let direction=if address&0x80!=0 {1} else {0};
+ number*2+direction
+}
+
+pub fn endpoint_ring_key(address:u8)->usize {
+ endpoint_context_index(address).saturating_sub(1).min(31)
+}
+
+pub fn endpoint_type(address:u8)->u32 {
+ if address&0x80!=0 { EP_TYPE_BULK_IN } else { EP_TYPE_BULK_OUT }
+}
+
+pub fn prepare_bulk_endpoint_context(
+ controller:&mut XhciController,
+ slot:u8,
+ endpoint_address:u8,
+ max_packet:u16,
+)->Result<(u64,u64),&'static str> {
+ if slot==0 || slot as usize>=XHCI_MAX_SLOTS { return Err("invalid xHCI slot"); }
+ let dci=endpoint_context_index(endpoint_address);
+ if dci<2 || dci>31 { return Err("invalid USB endpoint number"); }
+ let ring=if controller.endpoint_transfer_ring[slot as usize][endpoint_ring_key(endpoint_address)]!=0 {
+  controller.endpoint_transfer_ring[slot as usize][endpoint_ring_key(endpoint_address)]
+ } else {
+  let r=allocate_dma_page()?;
+  controller.endpoint_transfer_ring[slot as usize][endpoint_ring_key(endpoint_address)]=r;
+  unsafe {
+   core::ptr::write_bytes(r as *mut u8,0,XHCI_PAGE_SIZE as usize);
+   let link=Trb{parameter:r,status:0,control:TRB_TYPE_LINK|TRB_CYCLE|(1<<1)};
+   core::ptr::write_volatile((r as *mut Trb).add(XHCI_RING_TRBS-1),link);
+  }
+  r
+ };
+ let input=allocate_dma_page()?;
+ unsafe {
+  core::ptr::write_bytes(input as *mut u8,0,XHCI_PAGE_SIZE as usize);
+  let ctx=controller.capability.context_size() as usize;
+  let slot_ctx=(input as usize+32) as *mut u32;
+  let ep_ctx=(input as usize+32+dci*ctx) as *mut u32;
+  core::ptr::write_volatile((input as *mut u32).add(1),1u32<<dci);
+  core::ptr::write_volatile(slot_ctx,(dci as u32)<<27);
+  core::ptr::write_volatile(ep_ctx,0);
+  core::ptr::write_volatile(ep_ctx.add(1),endpoint_type(endpoint_address)<<3 | (max_packet as u32)<<16);
+  core::ptr::write_volatile(ep_ctx.add(2),(ring as u32)|1);
+  core::ptr::write_volatile(ep_ctx.add(3),(ring>>32) as u32);
+  core::ptr::write_volatile(ep_ctx.add(4),8);
+ }
+ Ok((input,ring))
+}
+
+pub fn enqueue_configure_endpoint(
+ controller:&mut XhciController,
+ slot:u8,
+ endpoint_address:u8,
+ max_packet:u16,
+)->Result<u64,&'static str> {
+ let (input,_ring)=prepare_bulk_endpoint_context(controller,slot,endpoint_address,max_packet)?;
+ let index=controller.command_ring.push_with_index(configure_endpoint_trb(input,slot,false))?;
+ unsafe {
+  let physical=(controller.command_ring_phys as *mut Trb).add(index);
+  core::ptr::write_volatile(physical,controller.command_ring.trbs[index]);
+  ring_doorbell(controller.mmio_base,controller.capability,0);
+ }
+ Ok(controller.command_ring_phys+(index as u64)*core::mem::size_of::<Trb>())
+}
+
+pub fn normal_trb(buffer:u64,length:u32,in_direction:bool)->Trb {
+ let mut control=TRB_TYPE_NORMAL|TRB_IOC;
+ if in_direction { control|=TRB_DIR_IN; }
+ Trb{parameter:buffer,status:length.min(0x1ffff),control}
+}
+
+pub fn enqueue_bulk_transfer(
+ controller:&mut XhciController,
+ slot:u8,
+ endpoint_address:u8,
+ buffer:u64,
+ length:u32,
+)->Result<u64,&'static str> {
+ if slot==0 || slot as usize>=XHCI_MAX_SLOTS { return Err("invalid xHCI slot"); }
+ if length==0 { return Err("bulk transfer length is zero"); }
+ let key=endpoint_ring_key(endpoint_address);
+ let ring=controller.endpoint_transfer_ring[slot as usize][key];
+ if ring==0 { return Err("bulk endpoint is not configured"); }
+ unsafe {
+  let trb=normal_trb(buffer,length,endpoint_address&0x80!=0);
+  core::ptr::write_volatile(ring as *mut Trb,trb.with_cycle(true));
+  core::ptr::write_volatile((ring as *mut Trb).add(1),Trb{parameter:ring,status:0,control:TRB_TYPE_LINK|TRB_CYCLE|(1<<1)});
+  ring_doorbell(controller.mmio_base,controller.capability,slot);
+ }
+ Ok(ring)
 }
 
 pub fn setup_stage_trb(setup:UsbSetupPacket,transfer_type:u32)->Trb {
