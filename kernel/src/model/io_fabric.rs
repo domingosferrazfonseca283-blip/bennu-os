@@ -2,6 +2,7 @@ use super::{BlockDevice, BlockRequest, DeviceRequest, IoCompletion, IoEnvelope, 
 use super::policy::AccessPolicy;
 use super::sync::SpinLock;
 
+pub const IO_QUEUE_CAPACITY: usize = 64;
 pub const DEVICE_QUEUE_CAPACITY: usize = 64;
 
 struct IoStateTable {
