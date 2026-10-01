@@ -94,7 +94,7 @@ pub fn service_device_events() {
                         }
                         drop(guard);
                         let _ = DEVICE_FABRIC.lock().get_mut().bind_mass_storage_object(device, object);
-                        let _ = grant(CellId(owner_cell as u64), object, super::CapabilityRights::READ.union(super::CapabilityRights::WRITE).union(super::CapabilityRights::DEVICE).union(super::CapabilityRights::OBSERVE));
+                        let _ = grant(CellId(owner_cell as u32), object, super::CapabilityRights::READ.union(super::CapabilityRights::WRITE).union(super::CapabilityRights::DEVICE).union(super::CapabilityRights::OBSERVE));
                         published = object;
                     }
                 }
