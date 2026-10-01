@@ -154,8 +154,7 @@ impl DeviceFabric {
     user_buffer,dma_buffer:dma,length:super::usb::USB_BOT_CBW_LENGTH as u64,
     operation:9,phase:1,endpoint:transport.bulk_out,bot_tag:cbw.tag,
     bot_transfer_length:cbw.transfer_length.min(super::xhci::XHCI_PAGE_SIZE as u32),
-    bot_direction_in:cbw.flags&0x80!=0,bot_command:command.bytes[0],
-   ,bot_data_dma:0};
+    bot_direction_in:cbw.flags&0x80!=0,bot_command:command.bytes[0],bot_data_dma:0,;
    return Ok(());
   }
   Err("mass-storage controller unavailable")
@@ -294,7 +293,7 @@ impl DeviceFabric {
   let dma=super::xhci::allocate_dma_page()?;
   unsafe { core::ptr::write_bytes(dma as *mut u8,0,super::xhci::XHCI_PAGE_SIZE as usize); }
   if !in_direction {
-   let root=crate::model::runtime::cell_address_space_root(crate::model::CellId(request.owner_cell)).ok_or("owner Cell address space missing")?;
+   let root=crate::model::runtime::cell_address_space_root(crate::model::CellId(request.owner_cell as u32)).ok_or("owner Cell address space missing")?;
    crate::memory::user::copy_from_user(root,dma as *mut u8,request.buffer,request.length)?;
   }
   let ring=super::xhci::enqueue_bulk_transfer(&mut self.controllers[c],slot,endpoint,dma,request.length as u32)?;
@@ -372,7 +371,7 @@ impl DeviceFabric {
 
       if t.operation==10 {
        if t.bot_direction_in && t.user_buffer!=0 {
-        if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell)) {
+        if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell as u32)) {
          let _=crate::memory::user::copy_to_user(root,t.user_buffer,t.dma_buffer as *const u8,t.bot_transfer_length as u64);
         }
        }
@@ -433,7 +432,7 @@ impl DeviceFabric {
        }
       }
       if (t.operation==4 || t.operation==7) && t.length!=0 && t.user_buffer!=0 {
-       if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell)) {
+       if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell as u32)) {
         let _=crate::memory::user::copy_to_user(root,t.user_buffer,t.dma_buffer as *const u8,t.length);
        }
       }
