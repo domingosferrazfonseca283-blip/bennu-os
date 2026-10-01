@@ -223,6 +223,24 @@ impl DeviceFabric {
  }
 
  
+ pub fn mass_storage_geometry(&self,device:ObjectId)->Option<(u32,u64,ObjectId)> {
+  for i in 0..MAX_DEVICES {
+   if self.usb_devices[i].object==device && self.mass_storage[i].block_size!=0 && self.mass_storage[i].block_count!=0 {
+    return Some((self.mass_storage[i].block_size,self.mass_storage[i].block_count,self.mass_storage[i].block_object));
+   }
+  }
+  None
+ }
+ pub fn bind_mass_storage_object(&mut self,device:ObjectId,object:ObjectId)->Result<(),&'static str> {
+  for i in 0..MAX_DEVICES {
+   if self.usb_devices[i].object==device {
+    self.mass_storage[i].block_object=object;
+    return Ok(());
+   }
+  }
+  Err("mass-storage device not found")
+ }
+
  pub fn mass_storage_endpoint_command_completed(&mut self,device:ObjectId,token:u64,owner_cell:u64)->Result<(),&'static str> {
   for i in 0..MAX_DEVICES {
    if self.usb_devices[i].object!=device { continue; }
