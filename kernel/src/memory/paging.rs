@@ -350,16 +350,23 @@ pub fn map_page(virtual_address: u64, physical_frame: u64) -> Result<(), &'stati
 
 
 pub const MMIO_BASE: u64 = 0xffff_8000_0000_0000;
+static mut MMIO_NEXT: u64 = MMIO_BASE;
 
 pub fn map_mmio(physical_base:u64, length:u64) -> Result<u64,&'static str> {
     if length == 0 { return Err("empty MMIO range"); }
     let physical = physical_base & !(PAGE_SIZE - 1);
     let end = physical_base.checked_add(length).ok_or("MMIO range overflow")?;
     let pages = (end - physical + PAGE_SIZE - 1) / PAGE_SIZE;
+    let span = pages.checked_mul(PAGE_SIZE).ok_or("MMIO virtual range overflow")?;
+    let virtual_base = unsafe {
+        let base = MMIO_NEXT;
+        MMIO_NEXT = base.checked_add(span).ok_or("MMIO virtual range overflow")?;
+        base
+    };
     for page in 0..pages {
-        let va = MMIO_BASE.checked_add(page * PAGE_SIZE).ok_or("MMIO virtual range overflow")?;
+        let va = virtual_base.checked_add(page * PAGE_SIZE).ok_or("MMIO virtual range overflow")?;
         let pa = physical.checked_add(page * PAGE_SIZE).ok_or("MMIO physical range overflow")?;
         map_page(va, pa)?;
     }
-    Ok(MMIO_BASE + (physical_base - physical))
+    Ok(virtual_base + (physical_base - physical))
 }
