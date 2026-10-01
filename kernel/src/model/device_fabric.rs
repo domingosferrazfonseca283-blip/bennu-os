@@ -91,7 +91,7 @@ impl DeviceFabric {
   let setup=super::xhci::UsbSetupPacket::get_descriptor(descriptor_type,0,length as u16);
   let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,setup,dma,length as u16)?;
   let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
-  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode,phase:0,endpoint:0};
+  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0};
   Ok(())
  }
  fn parse_configuration(&mut self,device:ObjectId,dma:u64,length:u64)->Result<(),&'static str> {
@@ -253,7 +253,7 @@ impl DeviceFabric {
   if configuration==0 { return Err("USB configuration value missing"); }
   let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,super::xhci::UsbSetupPacket::set_configuration(configuration),0,0)?;
   let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
-  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+16,owner_cell:request.owner_cell,user_buffer:0,dma_buffer:0,length:0,operation:request.opcode,phase:0,endpoint:0};
+  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+16,owner_cell:request.owner_cell,user_buffer:0,dma_buffer:0,length:0,operation:request.opcode,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0};
   Ok(())
  }
  fn submit_usb_bulk(&mut self,c:usize,request:&super::DeviceRequest,in_direction:bool)->Result<(),&'static str> {
@@ -272,7 +272,7 @@ impl DeviceFabric {
   self.transfers[p]=PendingTransfer{
    valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring,
    owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:request.length,
-   operation:request.opcode as u8,phase:0,endpoint,
+   operation:request.opcode as u8,phase:0,endpoint,bot_tag:0,bot_transfer_length:0,bot_direction_in:in_direction,bot_command:0,
   };
   Ok(())
  }
@@ -323,22 +323,108 @@ impl DeviceFabric {
    if event.is_none() { continue; }
    let event=event.unwrap();
    match event.event_type() {
-    super::xhci::TRB_TYPE_TRANSFER_EVENT => { let ptr=event.trb.parameter & !0xFu64; for p in 0..MAX_PENDING_TRANSFERS { if self.transfers[p].valid && self.transfers[p].slot==event.slot_id() && ptr==self.transfers[p].completion_trb { let t=self.transfers[p]; self.transfers[p]=PendingTransfer::EMPTY; if event.completion_code()==1 { if t.operation==4 { let _=self.parse_configuration(t.device,t.dma_buffer,t.length); } if t.operation==5 { for i in 0..MAX_DEVICES { if self.usb_devices[i].object==t.device { self.usb_devices[i].state=super::usb::UsbDeviceState::Configured; self.usb_devices[i].configured=true; } } } if (t.operation==4 || t.operation==7) && t.length!=0 { if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell as u64)) { let _=crate::memory::user::copy_to_user(root,t.user_buffer,t.dma_buffer as *const u8,t.length); } } } let descriptor = if t.operation==2 && event.slot_id() != 0 && event.completion_code() == 1 {
+    super::xhci::TRB_TYPE_TRANSFER_EVENT => {
+     let ptr=event.trb.parameter & !0xFu64;
+     for p in 0..MAX_PENDING_TRANSFERS {
+      if !self.transfers[p].valid || self.transfers[p].slot!=event.slot_id() || ptr!=self.transfers[p].completion_trb { continue; }
+      let t=self.transfers[p];
+      self.transfers[p]=PendingTransfer::EMPTY;
+      if event.completion_code()!=1 { return Some((t.device,t.token,event.slot_id(),event.completion_code(),t.operation,t.owner_cell,None)); }
+
+      if t.operation==9 {
+       if t.bot_transfer_length!=0 {
+        let _=self.queue_bot_data(t);
+       } else {
+        let _=self.queue_bot_csw(t);
+       }
+       return Some((t.device,t.token,event.slot_id(),event.completion_code(),t.operation,t.owner_cell,None));
+      }
+
+      if t.operation==10 {
+       if t.bot_direction_in && t.user_buffer!=0 {
+        if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell)) {
+         let _=crate::memory::user::copy_to_user(root,t.user_buffer,t.dma_buffer as *const u8,t.bot_transfer_length as u64);
+        }
+       }
+       let _=self.queue_bot_csw(t);
+       return Some((t.device,t.token,event.slot_id(),event.completion_code(),t.operation,t.owner_cell,None));
+      }
+
+      if t.operation==11 {
+       let mut csw_ok=false;
+       unsafe {
+        let pbytes=t.dma_buffer as *const u8;
+        let bytes=[
+         core::ptr::read_volatile(pbytes.add(0)),core::ptr::read_volatile(pbytes.add(1)),
+         core::ptr::read_volatile(pbytes.add(2)),core::ptr::read_volatile(pbytes.add(3)),
+         core::ptr::read_volatile(pbytes.add(4)),core::ptr::read_volatile(pbytes.add(5)),
+         core::ptr::read_volatile(pbytes.add(6)),core::ptr::read_volatile(pbytes.add(7)),
+         core::ptr::read_volatile(pbytes.add(8)),core::ptr::read_volatile(pbytes.add(9)),
+         core::ptr::read_volatile(pbytes.add(10)),core::ptr::read_volatile(pbytes.add(11)),
+         core::ptr::read_volatile(pbytes.add(12))
+        ];
+        let csw=super::UsbMassStorageBotCsw::decode(&bytes);
+        csw_ok=csw.valid(t.bot_tag) && csw.residue<=t.bot_transfer_length;
+       }
+       if csw_ok {
+        for i in 0..MAX_DEVICES {
+         if self.usb_devices[i].object!=t.device { continue; }
+         if t.bot_command==0x12 {
+          self.mass_storage[i].stage=super::UsbMassStorageStage::Idle;
+          let _=self.submit_bot_cbw(t.device,t.token.wrapping_add(1),t.owner_cell,super::ScsiCommand::read_capacity10(),0,8);
+         } else if t.bot_command==0x25 {
           unsafe {
            let p=t.dma_buffer as *const u8;
-           if core::ptr::read_volatile(p.add(1)) == super::usb::USB_DEVICE_DESCRIPTOR_TYPE && core::ptr::read_volatile(p) >= 18 {
-            Some(UsbDeviceDescriptor{
-             address:UsbAddress{bus:0,address:0},
-             vendor:(core::ptr::read_volatile(p.add(9)) as u16) << 8 | core::ptr::read_volatile(p.add(8)) as u16,
-             product:(core::ptr::read_volatile(p.add(11)) as u16) << 8 | core::ptr::read_volatile(p.add(10)) as u16,
-             class_code:core::ptr::read_volatile(p.add(4)),
-             subclass:core::ptr::read_volatile(p.add(5)),
-             protocol:core::ptr::read_volatile(p.add(6)),
-            })
-           } else { None }
+           let last=((core::ptr::read_volatile(p) as u32)<<24)|((core::ptr::read_volatile(p.add(1)) as u32)<<16)|((core::ptr::read_volatile(p.add(2)) as u32)<<8)|core::ptr::read_volatile(p.add(3)) as u32;
+           let block=((core::ptr::read_volatile(p.add(4)) as u32)<<24)|((core::ptr::read_volatile(p.add(5)) as u32)<<16)|((core::ptr::read_volatile(p.add(6)) as u32)<<8)|core::ptr::read_volatile(p.add(7)) as u32;
+           if block!=0 {
+            self.mass_storage[i].block_size=block;
+            self.mass_storage[i].block_count=(last as u64).saturating_add(1);
+            self.mass_storage[i].stage=super::UsbMassStorageStage::Idle;
+           } else { self.mass_storage[i].stage=super::UsbMassStorageStage::Failed; }
           }
-         } else { None };
-         return Some((t.device,t.token,event.slot_id(),event.completion_code(),t.operation,t.owner_cell,descriptor)); } } }
+         }
+        }
+       } else {
+        for i in 0..MAX_DEVICES { if self.usb_devices[i].object==t.device { self.mass_storage[i].stage=super::UsbMassStorageStage::Failed; } }
+       }
+       return Some((t.device,t.token,event.slot_id(),event.completion_code(),t.operation,t.owner_cell,None));
+      }
+
+      if t.operation==4 {
+       let _=self.parse_configuration(t.device,t.dma_buffer,t.length);
+      }
+      if t.operation==5 {
+       for i in 0..MAX_DEVICES {
+        if self.usb_devices[i].object==t.device {
+         self.usb_devices[i].state=super::usb::UsbDeviceState::Configured;
+         self.usb_devices[i].configured=true;
+        }
+       }
+      }
+      if (t.operation==4 || t.operation==7) && t.length!=0 && t.user_buffer!=0 {
+       if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell)) {
+        let _=crate::memory::user::copy_to_user(root,t.user_buffer,t.dma_buffer as *const u8,t.length);
+       }
+      }
+      let descriptor=if t.operation==2 && event.slot_id()!=0 {
+       unsafe {
+        let p=t.dma_buffer as *const u8;
+        if core::ptr::read_volatile(p.add(1))==super::usb::USB_DEVICE_DESCRIPTOR_TYPE && core::ptr::read_volatile(p)>=18 {
+         Some(UsbDeviceDescriptor{
+          address:UsbAddress{bus:0,address:0},
+          vendor:(core::ptr::read_volatile(p.add(9)) as u16)<<8|core::ptr::read_volatile(p.add(8)) as u16,
+          product:(core::ptr::read_volatile(p.add(11)) as u16)<<8|core::ptr::read_volatile(p.add(10)) as u16,
+          class_code:core::ptr::read_volatile(p.add(4)),
+          subclass:core::ptr::read_volatile(p.add(5)),
+          protocol:core::ptr::read_volatile(p.add(6)),
+         })
+        } else { None }
+       }
+      } else { None };
+      return Some((t.device,t.token,event.slot_id(),event.completion_code(),t.operation,t.owner_cell,descriptor));
+     }
+    }
     super::xhci::TRB_TYPE_CMD_COMPLETION => {
      let command_trb=event.trb.parameter & !0xFu64;
      for p in 0..MAX_PENDING_COMMANDS {
