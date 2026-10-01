@@ -326,7 +326,8 @@ setup_vbe:
     jbe .next_mode
     mov [vbe_best_score], bx
     mov [vbe_best_mode], cx
-    mov [vbe_best_pitch], word [VBE_MODE_INFO + 50]
+    mov ax, [VBE_MODE_INFO + 50]
+    mov [vbe_best_pitch], ax
     mov [vbe_best_phys], dword [VBE_MODE_INFO + 40]
     mov ax, [VBE_MODE_INFO + 18]
     mov [vbe_best_width], ax
