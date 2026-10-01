@@ -51,6 +51,7 @@ impl BootInfo {
             && self.magic == BENNU_BOOT_MAGIC
             && self.version == BENNU_BOOT_VERSION
             && self.size as usize >= core::mem::size_of::<Self>()
+            && (self.memory_map_entries == 0 || self.memory_map_addr != 0)
             && self.memory_map_entry_size as usize == core::mem::size_of::<E820Entry>()
             && self.memory_map_entries as usize <= BENNU_E820_MAX_ENTRIES
     }
