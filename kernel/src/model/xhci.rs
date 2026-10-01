@@ -56,6 +56,8 @@ impl CapabilityRegisters {
  pub const fn max_slots(&self)->u16 { (self.hcs_params1 & 0xff) as u16 }
  pub const fn max_ports(&self)->u8 { ((self.hcs_params1 >> 24) & 0xff) as u8 }
  pub const fn supports_64bit(&self)->bool { self.hcc_params1 & 1 != 0 }
+ pub const fn context_size(&self)->u64 { if self.hcc_params1 & (1<<2) != 0 { 64 } else { 32 } }
+ pub const fn ep0_max_packet(speed:u8)->u32 { match speed { 1|2=>8, 3=>64, 4|5=>512, _=>8 } }
 }
 
 #[repr(C)]
@@ -408,8 +410,8 @@ pub fn prepare_address_device_context(
   core::ptr::write_volatile(slot_ctx.add(1),(port as u32)<<16);
   // EP0 Context DW1: endpoint type/control transfer + max packet size.
   // The initial packet size is selected conservatively by USB speed.
-  let max_packet=match speed { 1=>8, 2=>64, 3=>64, 4=>512, _=>8 } as u32;
-  core::ptr::write_volatile(ep0_ctx.add(1),3<<3 | max_packet<<16);
+  let max_packet=CapabilityRegisters::ep0_max_packet(speed);
+  core::ptr::write_volatile(ep0_ctx.add(1),4<<3 | max_packet<<16);
   // Device Context Base Address Array entry for this slot.
   core::ptr::write_volatile((controller.dcbaa_phys as *mut u64).add(slot as usize),device);
  }
