@@ -87,11 +87,17 @@ impl Scheduler {
             CURRENT_CELL.store(id.0, Ordering::Release);
 
             if super::runtime::start_cell(id).is_err() {
+                // The identity is only valid while this Cell is actually
+                // executing. Never leave a failed dispatch as current.
+                clear_current_cell();
                 continue;
             }
 
             unsafe {
                 if execution::switch_to_cell(context, address_space_root).is_ok() {
+                    // Returning here means the Cell yielded/stopped and the
+                    // scheduler stack is active again.
+                    clear_current_cell();
                     return Some(id);
                 }
             }
