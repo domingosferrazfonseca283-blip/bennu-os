@@ -91,7 +91,7 @@ impl DeviceFabric {
   let setup=super::xhci::UsbSetupPacket::get_descriptor(descriptor_type,0,length as u16);
   let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,setup,dma,length as u16)?;
   let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
-  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0};
+  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:length as u64,operation:request.opcode,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0,bot_data_dma:0};
   Ok(())
  }
  fn parse_configuration(&mut self,device:ObjectId,dma:u64,length:u64)->Result<(),&'static str> {
@@ -155,7 +155,7 @@ impl DeviceFabric {
     operation:9,phase:1,endpoint:transport.bulk_out,bot_tag:cbw.tag,
     bot_transfer_length:cbw.transfer_length.min(super::xhci::XHCI_PAGE_SIZE as u32),
     bot_direction_in:cbw.flags&0x80!=0,bot_command:command.bytes[0],
-   };
+   ,bot_data_dma:0};
    return Ok(());
   }
   Err("mass-storage controller unavailable")
@@ -191,7 +191,7 @@ impl DeviceFabric {
   unsafe { core::ptr::write_bytes(dma as *mut u8,0,super::xhci::XHCI_PAGE_SIZE as usize); }
   if !t.bot_direction_in {
    if t.user_buffer==0 { return Err("BOT OUT transfer requires user buffer"); }
-   let root=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell)).ok_or("owner Cell address space missing")?;
+   let root=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell as u32)).ok_or("owner Cell address space missing")?;
    crate::memory::user::copy_from_user(root,dma as *mut u8,t.user_buffer,t.bot_transfer_length as u64)?;
   }
   let controller=self.usb_devices[i].controller;
@@ -283,7 +283,7 @@ impl DeviceFabric {
   if configuration==0 { return Err("USB configuration value missing"); }
   let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,super::xhci::UsbSetupPacket::set_configuration(configuration),0,0)?;
   let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?;
-  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+16,owner_cell:request.owner_cell,user_buffer:0,dma_buffer:0,length:0,operation:request.opcode,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0};
+  self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+16,owner_cell:request.owner_cell,user_buffer:0,dma_buffer:0,length:0,operation:request.opcode,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0,bot_data_dma:0};
   Ok(())
  }
  fn submit_usb_bulk(&mut self,c:usize,request:&super::DeviceRequest,in_direction:bool)->Result<(),&'static str> {
