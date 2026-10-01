@@ -7,8 +7,8 @@ pub const MAX_PENDING_TRANSFERS:usize=64;
 
 #[repr(C)]
 #[derive(Clone,Copy)]
-pub struct PendingTransfer { pub valid:bool,pub device:ObjectId,pub token:u64,pub slot:u8,pub ring:u64 }
-impl PendingTransfer { pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,slot:0,ring:0}; }
+pub struct PendingTransfer { pub valid:bool,pub device:ObjectId,pub token:u64,pub slot:u8,pub ring:u64,pub completion_trb:u64,pub owner_cell:u64 }
+impl PendingTransfer { pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,slot:0,ring:0,completion_trb:0,owner_cell:0}; }
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -17,9 +17,11 @@ pub struct PendingCommand {
  pub device:ObjectId,
  pub token:u64,
  pub command_trb:u64,
+ pub owner_cell:u64,
+ pub operation:u8,
 }
 impl PendingCommand {
- pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,command_trb:0};
+ pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,command_trb:0,owner_cell:0,operation:0};
 }
 
 #[repr(C)]
@@ -79,11 +81,12 @@ impl DeviceFabric {
        };
        let command_trb=super::xhci::enqueue_enable_slot(&mut self.controllers[c])?;
        self.pending[pending_slot]=PendingCommand{
-        valid:true,device:request.device,token:request.token,command_trb
+        valid:true,device:request.device,token:request.token,command_trb,
+        owner_cell:request.owner_cell,operation:request.opcode
        };
        Ok(())
       },
-      2 => { let slot=request.value as u8; let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,super::xhci::UsbSetupPacket::get_descriptor(1,0,18),request.buffer,18)?; let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?; self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring}; Ok(()) },
+      2 => { let slot=request.value as u8; let ring=super::xhci::enqueue_control_transfer(&mut self.controllers[c],slot,super::xhci::UsbSetupPacket::get_descriptor(1,0,18),request.buffer,18)?; let p=(0..MAX_PENDING_TRANSFERS).find(|i| !self.transfers[*i].valid).ok_or("transfer tracking full")?; self.transfers[p]=PendingTransfer{valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring+32,owner_cell:request.owner_cell}; Ok(()) },
       _ => Err("unsupported xHCI device operation"),
      };
     }
@@ -93,20 +96,20 @@ impl DeviceFabric {
   }
   Err("device not registered in fabric")
  }
- pub fn service_events(&mut self)->Option<(ObjectId,u64,u8,u8)> {
+ pub fn service_events(&mut self)->Option<(ObjectId,u64,u8,u8,u8,u64)> {
   for c in 0..self.controller_count {
    let event=unsafe { super::xhci::poll_event(&mut self.controllers[c]) };
    if event.is_none() { continue; }
    let event=event.unwrap();
    match event.event_type() {
-    super::xhci::TRB_TYPE_TRANSFER_EVENT => { let ptr=event.trb.parameter & !0xFu64; for p in 0..MAX_PENDING_TRANSFERS { if self.transfers[p].valid && self.transfers[p].slot==event.slot_id() && ptr>=self.transfers[p].ring && ptr<self.transfers[p].ring+48 { let t=self.transfers[p]; self.transfers[p]=PendingTransfer::EMPTY; return Some((t.device,t.token,event.slot_id(),event.completion_code())); } } }
+    super::xhci::TRB_TYPE_TRANSFER_EVENT => { let ptr=event.trb.parameter & !0xFu64; for p in 0..MAX_PENDING_TRANSFERS { if self.transfers[p].valid && self.transfers[p].slot==event.slot_id() && ptr==self.transfers[p].completion_trb { let t=self.transfers[p]; self.transfers[p]=PendingTransfer::EMPTY; return Some((t.device,t.token,event.slot_id(),event.completion_code(),2,t.owner_cell)); } } }
     super::xhci::TRB_TYPE_CMD_COMPLETION => {
      let command_trb=event.trb.parameter & !0xFu64;
      for p in 0..MAX_PENDING_COMMANDS {
       if self.pending[p].valid && self.pending[p].command_trb==command_trb {
        let pending=self.pending[p];
        self.pending[p]=PendingCommand::EMPTY;
-       return Some((pending.device,pending.token,event.slot_id(),event.completion_code()));
+       return Some((pending.device,pending.token,event.slot_id(),event.completion_code(),pending.operation,pending.owner_cell));
       }
      }
     }
