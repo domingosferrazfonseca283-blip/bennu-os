@@ -258,7 +258,9 @@ pub fn context_ptr(cell: CellId) -> Option<(*mut crate::arch::x86_64::execution:
 }
 
 pub fn prepare_cell_context(cell: CellId, trampoline: u64) -> Result<(), &'static str> {
-    let stack = crate::memory::allocate_frame_below(crate::memory::PAGE_SIZE * 16384)
+    // The bootstrap allocator returns individual 4 KiB frames. Keep the
+    // execution stack exactly as large as the frame we actually own and map.
+    let stack = crate::memory::allocate_frame_below(64 * 1024 * 1024)
         .ok_or("no physical frame for cell stack")?;
 
     let root = crate::memory::paging::create_address_space_root()?;
