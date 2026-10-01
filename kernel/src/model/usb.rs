@@ -170,6 +170,14 @@ pub struct UsbMassStorageBotCbw {
  pub command:[u8;16],
 }
 impl UsbMassStorageBotCbw {
+ pub fn encode(&self,out:&mut [u8;USB_BOT_CBW_LENGTH]) {
+  *out=[0;USB_BOT_CBW_LENGTH];
+  out[0..4].copy_from_slice(&self.signature.to_le_bytes());
+  out[4..8].copy_from_slice(&self.tag.to_le_bytes());
+  out[8..12].copy_from_slice(&self.transfer_length.to_le_bytes());
+  out[12]=self.flags; out[13]=self.lun; out[14]=self.command_length;
+  out[15..31].copy_from_slice(&self.command);
+ }
  pub const SIGNATURE:u32=0x43425355;
  pub const EMPTY:Self=Self{signature:Self::SIGNATURE,tag:0,transfer_length:0,flags:0,lun:0,command_length:0,command:[0;16]};
  pub const fn new(tag:u32,transfer_length:u32,in_direction:bool,lun:u8,command_length:u8,command:[u8;16])->Self{
@@ -186,6 +194,14 @@ pub struct UsbMassStorageBotCsw {
  pub status:u8,
 }
 impl UsbMassStorageBotCsw {
+ pub fn decode(bytes:&[u8;USB_BOT_CSW_LENGTH])->Self {
+  Self{
+   signature:u32::from_le_bytes([bytes[0],bytes[1],bytes[2],bytes[3]]),
+   tag:u32::from_le_bytes([bytes[4],bytes[5],bytes[6],bytes[7]]),
+   residue:u32::from_le_bytes([bytes[8],bytes[9],bytes[10],bytes[11]]),
+   status:bytes[12],
+  }
+ }
  pub const SIGNATURE:u32=0x53425355;
  pub const STATUS_PASSED:u8=0;
  pub const STATUS_FAILED:u8=1;
