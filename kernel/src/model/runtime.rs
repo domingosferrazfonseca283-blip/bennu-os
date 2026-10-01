@@ -15,6 +15,7 @@ struct RuntimeState {
     event_tail: usize,
     next_object: usize,
     memory_frames: [u64; MAX_OBJECTS],
+    block_devices: [super::BlockDevice; super::storage::MAX_BLOCK_DEVICES],
 }
 
 impl RuntimeState {
@@ -27,6 +28,7 @@ impl RuntimeState {
         event_tail: 0,
         next_object: 1,
         memory_frames: [0; MAX_OBJECTS],
+        block_devices: [super::BlockDevice::EMPTY; super::storage::MAX_BLOCK_DEVICES],
     };
 }
 
@@ -66,6 +68,37 @@ pub fn service_device_events() {
             let _ = DEVICE_FABRIC.lock().get_mut().configure_mass_storage_endpoints(
                 device, token, owner_cell
             );
+        } else if operation == 6 && completion_code == 1 {
+            let _ = DEVICE_FABRIC.lock().get_mut().mass_storage_endpoint_command_completed(
+                device, token, owner_cell
+            );
+        } else if operation == 11 && completion_code == 1 {
+            let geometry = DEVICE_FABRIC.lock().get_mut().mass_storage_geometry(device);
+            if let Some((block_size, block_count, existing)) = geometry {
+                if existing.is_null() {
+                    if let Ok(object) = create_object(super::ObjectKind::Device, owner_cell as u32) {
+                        let block = super::BlockDevice {
+                            object,
+                            kind: super::BlockKind::UsbMassStorage,
+                            geometry: super::BlockGeometry { block_size, block_count },
+                            removable: true,
+                            writable: true,
+                        };
+                        let mut guard = RUNTIME.lock();
+                        let state = guard.get_mut();
+                        for i in 0..super::storage::MAX_BLOCK_DEVICES {
+                            if state.block_devices[i].object.is_null() {
+                                state.block_devices[i]=block;
+                                break;
+                            }
+                        }
+                        drop(guard);
+                        let _ = DEVICE_FABRIC.lock().get_mut().bind_mass_storage_object(device, object);
+                        let _ = grant(CellId(owner_cell as u64), object, super::CapabilityRights::READ.union(super::CapabilityRights::WRITE).union(super::CapabilityRights::DEVICE).union(super::CapabilityRights::OBSERVE));
+                        published = object;
+                    }
+                }
+            }
         }
         let kind = if operation == 2 {
             super::EventKind::DeviceTransferCompleted
