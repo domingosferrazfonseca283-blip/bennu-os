@@ -128,6 +128,20 @@ extern "C" fn bennu_syscall_dispatch(frame: *mut RegisterFrame) -> u64 {
         return abi::ABI_STATUS_INVALID;
     }
 
+    if matches!(operation, Operation::DeviceSubmit) {
+        let root = match crate::model::runtime::cell_address_space_root(cell) {
+            Some(root) if root != 0 => root,
+            _ => {
+                regs.rax = abi::ABI_STATUS_INVALID;
+                return abi::ABI_STATUS_INVALID;
+            }
+        };
+        if !crate::memory::paging::validate_user_buffer(root, regs.rdx, regs.r10, true) {
+            regs.rax = abi::ABI_STATUS_INVALID;
+            return abi::ABI_STATUS_INVALID;
+        }
+    }
+
     let call = Call {
         operation,
         flags: if matches!(operation, Operation::DeviceSubmit) { regs.r11 as u16 } else { 0 },
