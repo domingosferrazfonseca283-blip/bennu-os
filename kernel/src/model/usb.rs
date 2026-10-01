@@ -106,11 +106,12 @@ pub struct UsbMassStorageTransport {
  pub block_size:u32,
  pub block_count:u64,
  pub configured_endpoints:u8,
+ pub block_object:super::ObjectId,
 }
 impl UsbMassStorageTransport {
  pub const EMPTY:Self=Self{
   interface_number:0,bulk_in:0,bulk_out:0,max_packet_in:0,max_packet_out:0,
-  tag:0,stage:UsbMassStorageStage::Idle,block_size:0,block_count:0,configured_endpoints:0,
+  tag:0,stage:UsbMassStorageStage::Idle,block_size:0,block_count:0,configured_endpoints:0,block_object:super::ObjectId::NULL,
  };
  pub const fn valid(&self)->bool { self.bulk_in!=0 && self.bulk_out!=0 && self.max_packet_in!=0 && self.max_packet_out!=0 }
  pub fn next_tag(&mut self)->u32 { self.tag=self.tag.wrapping_add(1).max(1); self.tag }
