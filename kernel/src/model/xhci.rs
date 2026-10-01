@@ -290,6 +290,7 @@ pub struct UsbSetupPacket {
  pub request_type:u8,pub request:u8,pub value:u16,pub index:u16,pub length:u16,
 }
 impl UsbSetupPacket {
+ pub const fn set_configuration(configuration:u8)->Self { Self{request_type:0,request:9,value:configuration as u16,index:0,length:0} }
  pub const fn get_descriptor(kind:u8,index:u8,length:u16)->Self {
   Self{request_type:0x80,request:6,value:((kind as u16)<<8)|index as u16,index:0,length}
  }
