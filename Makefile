@@ -24,7 +24,7 @@ image:
 	fi; \
 	nasm -dKERNEL_SECTORS=$$KERNEL_SECTORS -f bin boot/stage2.asm -o $(STAGE2)
 	nasm -f bin boot/stage1.asm -o $(STAGE1)
-	truncate -s 2048 $(STAGE2)
+	truncate -s 4096 $(STAGE2)
 	cat $(STAGE1) $(STAGE2) $(KERNEL_BIN) > $(IMAGE)
 
 clean:
