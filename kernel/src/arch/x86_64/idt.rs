@@ -151,6 +151,13 @@ extern "x86-interrupt" fn breakpoint_handler(frame: InterruptStackFrame) {
     super::diagnostics::write_line(1, b"BENNU BREAKPOINT");
 }
 
+extern "x86-interrupt" fn keyboard_handler(frame: InterruptStackFrame) {
+    let _ = frame;
+    let scancode = unsafe { super::io::inb(0x60) };
+    crate::drivers::keyboard::feed_scancode(scancode);
+    unsafe { super::pic::end_of_interrupt(1); }
+}
+
 #[no_mangle]
 extern "C" fn bennu_timer_dispatch(frame: *mut TimerInterruptFrame) {
     if frame.is_null() {
@@ -242,6 +249,7 @@ pub fn init() {
         }
 
         IDT[3].set_address(breakpoint_handler as usize as u64);
+        IDT[33].set_address(keyboard_handler as usize as u64);
         IDT[32].set_address(bennu_timer_entry as usize as u64);
         extern "C" {
             fn bennu_syscall_entry();
