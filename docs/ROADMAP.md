@@ -71,6 +71,9 @@
 - [x] buffer DMA nativo para GET_DESCRIPTOR sem expor VA USER ao hardware
 - [x] persistência do Device Descriptor como UsbDevice/Object
 - [x] estado USB explícito Detached/Default/Addressed/Configured
+- [x] SET_CONFIGURATION como Control Transfer EP0
+- [x] parser nativo de Configuration Descriptor / interfaces / endpoints
+- [ ] Bulk Transfer Rings persistentes
 - [ ] SET_ADDRESS/SET_CONFIGURATION end-to-end
 - [ ] SET_ADDRESS/SET_CONFIGURATION end-to-end
 - [ ] fila de requests de bloco assíncrona
