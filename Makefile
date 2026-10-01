@@ -16,7 +16,6 @@ image:
 	RUSTFLAGS="-C link-arg=-T$(CURDIR)/kernel/linker.ld" cargo build --manifest-path kernel/Cargo.toml --target $(KERNEL_TARGET) --release -Zbuild-std=core,compiler_builtins -Zbuild-std-features=compiler-builtins-mem -Zjson-target-spec
 	test -n "$(KERNEL_ELF)" || exit 1; \
 	llvm-objcopy -O binary "$(KERNEL_ELF)" $(KERNEL_BIN)
-	llvm-objcopy -O binary "$$KERNEL_ELF" $(KERNEL_BIN)
 	@KERNEL_BYTES=$$(wc -c < $(KERNEL_BIN)); \
 	KERNEL_SECTORS=$$(( (KERNEL_BYTES + 511) / 512 )); \
 	if [ $$KERNEL_SECTORS -gt $(MAX_EARLY_KERNEL_SECTORS) ]; then \
