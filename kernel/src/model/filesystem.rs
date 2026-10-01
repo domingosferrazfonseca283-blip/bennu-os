@@ -189,7 +189,11 @@ impl JournalRecord {
 
 pub const fn blocks_for_bytes(bytes: u64) -> Option<u64> {
     if bytes == 0 { return Some(0); }
-    bytes.checked_add(BENNUFS_BLOCK_SIZE as u64 - 1).map(|v| v / BENNUFS_BLOCK_SIZE as u64)
+    let adjusted = match bytes.checked_add(BENNUFS_BLOCK_SIZE as u64 - 1) {
+        Some(value) => value,
+        None => return None,
+    };
+    Some(adjusted / BENNUFS_BLOCK_SIZE as u64)
 }
 
 pub const fn data_block_start(superblock: &Superblock) -> Option<u64> {
