@@ -286,3 +286,8 @@ Isto ainda não significa enumeração USB completa. O próximo passo é manter 
 ### Correlação de Transfer Events
 
 O Device Fabric mantém uma tabela persistente de transferências EP0. Cada operação guarda o slot, token e a região física da Transfer Ring. Quando o Event Ring entrega um `TRANSFER_EVENT`, o runtime correlaciona o ponteiro do TRB e o slot com a operação pendente e publica `DeviceCompleted`. O desenho mantém a identidade da operação no token da Capability/Cell, sem expor ponteiros físicos ao userspace.
+
+
+## Estado nativo de dispositivos USB
+
+O Bennu materializa um dispositivo USB descoberto como Objecto do Resource Graph somente após um TRANSFER_EVENT válido do GET_DESCRIPTOR. O Device Descriptor é recebido por DMA num buffer pertencente ao kernel, validado e transformado em estado persistente UsbDevice. O ciclo de vida explícito é Detached → Default → Addressed → Configured; a autoridade da Cell é representada por Capability e não por acesso direto ao controlador.
