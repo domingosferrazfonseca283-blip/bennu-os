@@ -56,7 +56,6 @@ pub fn init(policy: AccessPolicy) { *IO.lock().get_mut() = IoStateTable { policy
 /// runtime boundary; this layer additionally rejects cross-Cell queue injection.
 pub fn submit(request: BlockRequest, device: BlockDevice, is_boot_device: bool) -> Result<(), &'static str> {
     if !request.is_valid() || request.device != device.object { return Err("invalid block request"); }
-    if request.owner_cell == 0 { return Err("block request has no owner Cell"); }
     if !device.geometry.valid() { return Err("invalid block geometry"); }
 
     let guard = IO.lock();
@@ -104,7 +103,7 @@ pub fn queued() -> usize {
 pub const fn queue_capacity()->usize { IO_QUEUE_CAPACITY }
 
 pub fn submit_device(request: DeviceRequest) -> Result<(), &'static str> {
-    if !request.is_valid() || request.owner_cell == 0 { return Err("invalid device request"); }
+    if !request.is_valid() { return Err("invalid device request"); }
     DEVICE_IO.lock().get_mut().push(request)
 }
 
