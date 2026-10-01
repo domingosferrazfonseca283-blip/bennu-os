@@ -352,6 +352,20 @@ pub fn kernel_stack_top(cell: CellId) -> Option<u64> {
     if index >= MAX_CELLS || state.cells[index].state == CellState::Empty { None } else { Some(state.cells[index].kernel_stack_top) }
 }
 
+pub fn start_cell(cell: CellId) -> Result<(), &'static str> {
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+    let index = cell.0 as usize;
+    if index >= MAX_CELLS || state.cells[index].state == CellState::Empty {
+        return Err("cell does not exist");
+    }
+    if state.cells[index].state != CellState::Ready {
+        return Err("cell is not ready");
+    }
+    state.cells[index].state = CellState::Running;
+    Ok(())
+}
+
 pub fn finish_cell(cell: CellId, action: super::CellAction) -> Result<(), &'static str> {
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
