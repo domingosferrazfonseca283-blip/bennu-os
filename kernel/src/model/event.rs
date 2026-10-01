@@ -13,6 +13,8 @@ pub enum EventKind {
     Wake = 7,
     DeviceQueued = 8,
     DeviceCompleted = 9,
+    DeviceCommandCompleted = 10,
+    DeviceTransferCompleted = 11,
 }
 
 #[repr(C)]
