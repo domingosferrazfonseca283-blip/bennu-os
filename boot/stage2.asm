@@ -16,6 +16,7 @@ ORG 0x8000
 %define BIOS_CHUNK_SECTORS 64
 
 %define BOOT_INFO        0x5000
+%define VBE_CONTROLLER  0x5200
 %define VBE_MODE_INFO   0x5400
 %define VBE_MODE        0x118
 %define MEMORY_MAP       0x5100
@@ -251,59 +252,152 @@ setup_vbe:
     xor ax, ax
     mov ds, ax
     mov es, ax
-    mov di, VBE_MODE_INFO
-    xor ax, ax
-    mov cx, 128
-    rep stosd
 
-    mov ax, 0x4F01
-    mov cx, VBE_MODE
-    mov di, VBE_MODE_INFO
+    ; Query the VBE controller and obtain the firmware's actual mode list.
+    mov di, VBE_CONTROLLER
+    xor ax, ax
+    mov cx, 512
+    rep stosd
+    mov dword [VBE_CONTROLLER], 0x32454256
+    mov ax, 0x4F00
+    mov di, VBE_CONTROLLER
     int 0x10
     cmp ax, 0x004F
     jne .done
+
+    mov si, [VBE_CONTROLLER + 0x0E]
+    mov dx, [VBE_CONTROLLER + 0x10]
+    mov word [vbe_best_score], 0
+    mov word [vbe_best_mode], 0
+
+.next_mode:
+    mov es, dx
+    mov di, si
+    mov cx, [es:di]
+    add si, 2
+    cmp cx, 0xFFFF
+    je .select
+
+    push si
+    push dx
+    mov ax, 0x4F01
+    mov di, VBE_MODE_INFO
+    xor dx, dx
+    mov es, dx
+    int 0x10
+    pop dx
+    pop si
+    cmp ax, 0x004F
+    jne .next_mode
 
     mov ax, [VBE_MODE_INFO + 0]
     test ax, 0x0081
-    jz .done
+    jz .next_mode
     cmp byte [VBE_MODE_INFO + 25], 32
-    jne .done
+    jne .next_mode
+    cmp byte [VBE_MODE_INFO + 36], 6
+    jne .next_mode
 
+    xor bx, bx
+    cmp word [VBE_MODE_INFO + 18], 1024
+    jne .check_800
+    cmp word [VBE_MODE_INFO + 20], 768
+    jne .check_800
+    mov bx, 300
+    jmp .score
+.check_800:
+    cmp word [VBE_MODE_INFO + 18], 800
+    jne .check_640
+    cmp word [VBE_MODE_INFO + 20], 600
+    jne .check_640
+    mov bx, 200
+    jmp .score
+.check_640:
+    cmp word [VBE_MODE_INFO + 18], 640
+    jne .next_mode
+    cmp word [VBE_MODE_INFO + 20], 480
+    jne .next_mode
+    mov bx, 100
+
+.score:
+    test word [VBE_MODE_INFO + 0], 0x0080
+    jz .next_mode
+    cmp bx, [vbe_best_score]
+    jbe .next_mode
+    mov [vbe_best_score], bx
+    mov [vbe_best_mode], cx
+    mov [vbe_best_pitch], word [VBE_MODE_INFO + 50]
+    mov [vbe_best_phys], dword [VBE_MODE_INFO + 40]
+    mov ax, [VBE_MODE_INFO + 18]
+    mov [vbe_best_width], ax
+    mov ax, [VBE_MODE_INFO + 20]
+    mov [vbe_best_height], ax
+    mov al, [VBE_MODE_INFO + 25]
+    mov [vbe_best_bpp], al
+    mov al, [VBE_MODE_INFO + 31]
+    mov [vbe_best_red_mask], al
+    mov al, [VBE_MODE_INFO + 32]
+    mov [vbe_best_red_pos], al
+    mov al, [VBE_MODE_INFO + 29]
+    mov [vbe_best_green_mask], al
+    mov al, [VBE_MODE_INFO + 30]
+    mov [vbe_best_green_pos], al
+    mov al, [VBE_MODE_INFO + 27]
+    mov [vbe_best_blue_mask], al
+    mov al, [VBE_MODE_INFO + 28]
+    mov [vbe_best_blue_pos], al
+    jmp .next_mode
+
+.select:
+    cmp word [vbe_best_score], 0
+    je .done
+    mov bx, [vbe_best_mode]
+    or bx, 0x4000
     mov ax, 0x4F02
-    mov bx, VBE_MODE | 0x4000
-    mov di, VBE_MODE_INFO
     int 0x10
     cmp ax, 0x004F
     jne .done
 
-    mov eax, [VBE_MODE_INFO + 40]
+    mov eax, [vbe_best_phys]
     mov [BOOT_INFO + 56], eax
-    mov dword [BOOT_INFO + 60], 0
-    movzx eax, word [VBE_MODE_INFO + 16]
+    movzx eax, word [vbe_best_pitch]
     mov [BOOT_INFO + 64], eax
-    movzx eax, word [VBE_MODE_INFO + 18]
+    movzx eax, word [vbe_best_width]
     mov [BOOT_INFO + 68], eax
-    movzx eax, word [VBE_MODE_INFO + 20]
+    movzx eax, word [vbe_best_height]
     mov [BOOT_INFO + 72], eax
-    movzx eax, byte [VBE_MODE_INFO + 25]
+    movzx eax, byte [vbe_best_bpp]
     mov [BOOT_INFO + 76], eax
-    mov al, [VBE_MODE_INFO + 31]
+    mov al, [vbe_best_red_mask]
     mov [BOOT_INFO + 80], al
-    mov al, [VBE_MODE_INFO + 32]
+    mov al, [vbe_best_red_pos]
     mov [BOOT_INFO + 81], al
-    mov al, [VBE_MODE_INFO + 29]
+    mov al, [vbe_best_green_mask]
     mov [BOOT_INFO + 82], al
-    mov [BOOT_INFO + 83], byte 8
-    mov al, [VBE_MODE_INFO + 28]
+    mov al, [vbe_best_green_pos]
+    mov [BOOT_INFO + 83], al
+    mov al, [vbe_best_blue_mask]
     mov [BOOT_INFO + 84], al
-    mov [BOOT_INFO + 85], byte 8
-    mov al, [VBE_MODE_INFO + 27]
-    mov [BOOT_INFO + 86], al
-    mov [BOOT_INFO + 87], byte 8
+    mov al, [vbe_best_blue_pos]
+    mov [BOOT_INFO + 85], al
 .done:
     pop es
     pop ds
     ret
+
+vbe_best_score dw 0
+vbe_best_mode dw 0
+vbe_best_pitch dw 0
+vbe_best_width dw 0
+vbe_best_height dw 0
+vbe_best_bpp db 0
+vbe_best_red_mask db 0
+vbe_best_red_pos db 0
+vbe_best_green_mask db 0
+vbe_best_green_pos db 0
+vbe_best_blue_mask db 0
+vbe_best_blue_pos db 0
+vbe_best_phys dd 0
 
 BITS 32
 protected_mode:
