@@ -291,3 +291,14 @@ O Device Fabric mantém uma tabela persistente de transferências EP0. Cada oper
 ## Estado nativo de dispositivos USB
 
 O Bennu materializa um dispositivo USB descoberto como Objecto do Resource Graph somente após um TRANSFER_EVENT válido do GET_DESCRIPTOR. O Device Descriptor é recebido por DMA num buffer pertencente ao kernel, validado e transformado em estado persistente UsbDevice. O ciclo de vida explícito é Detached → Default → Addressed → Configured; a autoridade da Cell é representada por Capability e não por acesso direto ao controlador.
+
+
+### Block I/O nativo sobre USB
+
+A fila de `BlockRequest` agora possui a Cell proprietária e pode ser consumida pelo runtime sem transformar I/O de armazenamento em uma chamada síncrona. Para um `BlockDevice` USB removível, o Device Fabric valida a geometria e converte a operação em SCSI READ(10)/WRITE(10) dentro do transporte USB Mass Storage BOT.
+
+O caminho passa por:
+
+`Cell → BlockRequest → I/O Fabric → USB Mass Storage → BOT/CBW → Bulk Transfer → CSW → DeviceTransferCompleted`
+
+O primeiro executor limita uma transferência a uma página DMA. Isso é deliberado: a próxima evolução será segmentação de requests grandes em múltiplos buffers/TRBs e, depois, a camada persistente BennuFS.
