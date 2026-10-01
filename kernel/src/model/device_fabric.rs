@@ -7,8 +7,8 @@ pub const MAX_PENDING_TRANSFERS:usize=64;
 
 #[repr(C)]
 #[derive(Clone,Copy)]
-pub struct PendingTransfer { pub valid:bool,pub device:ObjectId,pub token:u64,pub slot:u8,pub ring:u64,pub completion_trb:u64,pub owner_cell:u64,pub user_buffer:u64,pub dma_buffer:u64,pub length:u64,pub operation:u8 }
-impl PendingTransfer { pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,slot:0,ring:0,completion_trb:0,owner_cell:0,user_buffer:0,dma_buffer:0,length:0,operation:0}; }
+pub struct PendingTransfer { pub valid:bool,pub device:ObjectId,pub token:u64,pub slot:u8,pub ring:u64,pub completion_trb:u64,pub owner_cell:u64,pub user_buffer:u64,pub dma_buffer:u64,pub length:u64,pub operation:u8,pub phase:u8,pub endpoint:u8 }
+impl PendingTransfer { pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,slot:0,ring:0,completion_trb:0,owner_cell:0,user_buffer:0,dma_buffer:0,length:0,operation:0,phase:0,endpoint:0}; }
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -38,9 +38,10 @@ pub struct DeviceFabric {
  pub pending:[PendingCommand;MAX_PENDING_COMMANDS],
  pub transfers:[PendingTransfer;MAX_PENDING_TRANSFERS],
  pub usb_devices:[super::UsbDevice;MAX_DEVICES],
+ pub mass_storage:[super::UsbMassStorageTransport;MAX_DEVICES],
 }
 impl DeviceFabric {
- pub const fn empty()->Self{Self{devices:[DeviceRecord::EMPTY;MAX_DEVICES],controllers:[XhciController::EMPTY;MAX_CONTROLLERS],device_count:0,controller_count:0,pending:[PendingCommand::EMPTY;MAX_PENDING_COMMANDS],transfers:[PendingTransfer::EMPTY;MAX_PENDING_TRANSFERS],usb_devices:[super::UsbDevice::EMPTY;MAX_DEVICES]}}
+ pub const fn empty()->Self{Self{devices:[DeviceRecord::EMPTY;MAX_DEVICES],controllers:[XhciController::EMPTY;MAX_CONTROLLERS],device_count:0,controller_count:0,pending:[PendingCommand::EMPTY;MAX_PENDING_COMMANDS],transfers:[PendingTransfer::EMPTY;MAX_PENDING_TRANSFERS],usb_devices:[super::UsbDevice::EMPTY;MAX_DEVICES],mass_storage:[super::UsbMassStorageTransport::EMPTY;MAX_DEVICES]}}
  pub fn register_pci(&mut self,pci:PciDevice,class:DeviceClass)->Result<ObjectId,&'static str>{
   if self.device_count>=MAX_DEVICES{return Err("device fabric full");}
   let object=pci.object;
@@ -106,6 +107,7 @@ impl DeviceFabric {
     if self.usb_devices[i].object!=device { continue; }
     self.usb_devices[i].configuration=super::UsbConfiguration{configuration,interfaces,max_power_ma:max_power};
     self.usb_devices[i].topology=super::UsbDeviceTopology::EMPTY;
+    self.mass_storage[i]=super::UsbMassStorageTransport::EMPTY;
     let limit=(total as usize).min(length as usize).min(4096);
     let mut off=0usize;
     let mut current_interface:Option<super::UsbInterface>=None;
@@ -123,6 +125,7 @@ impl DeviceFabric {
      off+=len;
     }
     let _=current_interface;
+    self.mass_storage[i]=self.usb_devices[i].topology.mass_storage_transport();
     return Ok(());
    }
   }
@@ -177,7 +180,7 @@ impl DeviceFabric {
   self.transfers[p]=PendingTransfer{
    valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring,
    owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:request.length,
-   operation:request.opcode as u8,
+   operation:request.opcode as u8,phase:0,endpoint,
   };
   Ok(())
  }
