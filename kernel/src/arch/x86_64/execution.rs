@@ -67,7 +67,15 @@ pub unsafe fn prepare_context(
     }
 
     let stack_top = stack_frame.checked_add(4096).ok_or("cell stack overflow")?;
-    let sp = (stack_top.saturating_sub(7 * core::mem::size_of::<u64>() as u64)) & !0xf;
+
+    // The switcher pushes six callee-saved registers before saving RSP.
+    // Seed exactly the six restore slots plus the trampoline return address.
+    let frame_bytes = 7 * core::mem::size_of::<u64>() as u64;
+    let sp = stack_top.checked_sub(frame_bytes).ok_or("cell stack underflow")?;
+    let sp = sp & !0xf;
+    if sp < stack_frame || sp + frame_bytes > stack_top {
+        return Err("cell context frame does not fit stack");
+    }
     let slots = sp as *mut u64;
 
     for index in 0..6 {
@@ -127,8 +135,11 @@ pub unsafe fn switch_to_cell(context: *mut Context, address_space_root: u64) -> 
         SCHEDULER_ROOT = crate::memory::paging::current_root();
     }
 
-    CURRENT_CELL_CONTEXT = context;
     let cell_id = crate::model::scheduler::current_cell().ok_or("no current Cell")?;
+    if crate::model::runtime::cell_state(cell_id) != Some(crate::model::CellState::Running) {
+        return Err("Cell must be Running before context switch");
+    }
+    CURRENT_CELL_CONTEXT = context;
     let kernel_stack = crate::model::runtime::kernel_stack_top(cell_id).ok_or("Cell kernel stack is missing")?;
     crate::arch::x86_64::gdt::set_kernel_stack(kernel_stack)?;
     crate::memory::paging::switch_address_space(address_space_root)?;
