@@ -1,4 +1,4 @@
-use super::{DeviceClass,DeviceDescriptor,ObjectId,PciDevice,XhciController};
+use super::{DeviceClass,DeviceDescriptor,ObjectId,PciDevice,XhciController,UsbDeviceDescriptor,UsbAddress};
 
 pub const MAX_DEVICES:usize=128;
 pub const MAX_CONTROLLERS:usize=16;
@@ -37,9 +37,10 @@ pub struct DeviceFabric {
  pub controller_count:usize,
  pub pending:[PendingCommand;MAX_PENDING_COMMANDS],
  pub transfers:[PendingTransfer;MAX_PENDING_TRANSFERS],
+ pub usb_devices:[super::UsbDevice;MAX_DEVICES],
 }
 impl DeviceFabric {
- pub const fn empty()->Self{Self{devices:[DeviceRecord::EMPTY;MAX_DEVICES],controllers:[XhciController::EMPTY;MAX_CONTROLLERS],device_count:0,controller_count:0,pending:[PendingCommand::EMPTY;MAX_PENDING_COMMANDS],transfers:[PendingTransfer::EMPTY;MAX_PENDING_TRANSFERS]}}
+ pub const fn empty()->Self{Self{devices:[DeviceRecord::EMPTY;MAX_DEVICES],controllers:[XhciController::EMPTY;MAX_CONTROLLERS],device_count:0,controller_count:0,pending:[PendingCommand::EMPTY;MAX_PENDING_COMMANDS],transfers:[PendingTransfer::EMPTY;MAX_PENDING_TRANSFERS],usb_devices:[super::UsbDevice::EMPTY;MAX_DEVICES]}}
  pub fn register_pci(&mut self,pci:PciDevice,class:DeviceClass)->Result<ObjectId,&'static str>{
   if self.device_count>=MAX_DEVICES{return Err("device fabric full");}
   let object=pci.object;
@@ -104,20 +105,35 @@ impl DeviceFabric {
   }
   Err("device not registered in fabric")
  }
- pub fn service_events(&mut self)->Option<(ObjectId,u64,u8,u8,u8,u64)> {
+ pub fn service_events(&mut self)->Option<(ObjectId,u64,u8,u8,u8,u64,Option<UsbDeviceDescriptor>)> {
   for c in 0..self.controller_count {
    let event=unsafe { super::xhci::poll_event(&mut self.controllers[c]) };
    if event.is_none() { continue; }
    let event=event.unwrap();
    match event.event_type() {
-    super::xhci::TRB_TYPE_TRANSFER_EVENT => { let ptr=event.trb.parameter & !0xFu64; for p in 0..MAX_PENDING_TRANSFERS { if self.transfers[p].valid && self.transfers[p].slot==event.slot_id() && ptr==self.transfers[p].completion_trb { let t=self.transfers[p]; self.transfers[p]=PendingTransfer::EMPTY; if event.completion_code()==1 { if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell as u64)) { let _=crate::memory::user::copy_to_user(root,t.user_buffer,t.dma_buffer as *const u8,t.length as usize); } } return Some((t.device,t.token,event.slot_id(),event.completion_code(),2,t.owner_cell)); } } }
+    super::xhci::TRB_TYPE_TRANSFER_EVENT => { let ptr=event.trb.parameter & !0xFu64; for p in 0..MAX_PENDING_TRANSFERS { if self.transfers[p].valid && self.transfers[p].slot==event.slot_id() && ptr==self.transfers[p].completion_trb { let t=self.transfers[p]; self.transfers[p]=PendingTransfer::EMPTY; if event.completion_code()==1 { if let Some(root)=crate::model::runtime::cell_address_space_root(crate::model::CellId(t.owner_cell as u64)) { let _=crate::memory::user::copy_to_user(root,t.user_buffer,t.dma_buffer as *const u8,t.length as usize); } } let descriptor = if event.slot_id() != 0 && event.completion_code() == 1 {
+          unsafe {
+           let p=t.dma_buffer as *const u8;
+           if core::ptr::read_volatile(p.add(1)) == super::usb::USB_DEVICE_DESCRIPTOR_TYPE && core::ptr::read_volatile(p) >= 18 {
+            Some(UsbDeviceDescriptor{
+             address:UsbAddress{bus:0,address:0},
+             vendor:(core::ptr::read_volatile(p.add(9)) as u16) << 8 | core::ptr::read_volatile(p.add(8)) as u16,
+             product:(core::ptr::read_volatile(p.add(11)) as u16) << 8 | core::ptr::read_volatile(p.add(10)) as u16,
+             class_code:core::ptr::read_volatile(p.add(4)),
+             subclass:core::ptr::read_volatile(p.add(5)),
+             protocol:core::ptr::read_volatile(p.add(6)),
+            })
+           } else { None }
+          }
+         } else { None };
+         return Some((t.device,t.token,event.slot_id(),event.completion_code(),2,t.owner_cell,descriptor)); } } }
     super::xhci::TRB_TYPE_CMD_COMPLETION => {
      let command_trb=event.trb.parameter & !0xFu64;
      for p in 0..MAX_PENDING_COMMANDS {
       if self.pending[p].valid && self.pending[p].command_trb==command_trb {
        let pending=self.pending[p];
        self.pending[p]=PendingCommand::EMPTY;
-       return Some((pending.device,pending.token,event.slot_id(),event.completion_code(),pending.operation,pending.owner_cell));
+       return Some((pending.device,pending.token,event.slot_id(),event.completion_code(),pending.operation,pending.owner_cell,None));
       }
      }
     }
