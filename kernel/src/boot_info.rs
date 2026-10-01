@@ -33,6 +33,13 @@ pub struct BootInfo {
     pub framebuffer_width: u32,
     pub framebuffer_height: u32,
     pub framebuffer_bpp: u32,
+    pub framebuffer_red_mask: u8,
+    pub framebuffer_red_position: u8,
+    pub framebuffer_green_mask: u8,
+    pub framebuffer_green_position: u8,
+    pub framebuffer_blue_mask: u8,
+    pub framebuffer_blue_position: u8,
+    pub framebuffer_reserved: [u8; 2],
 }
 
 impl BootInfo {
