@@ -4,7 +4,7 @@ KERNEL_TARGET_NAME=x86_64-bennu
 STAGE1=build/stage1.bin
 STAGE2=build/stage2.bin
 IMAGE=build/bennu.img
-MAX_EARLY_KERNEL_SECTORS=120
+MAX_EARLY_KERNEL_SECTORS=65535
 
 .PHONY: all image clean
 
