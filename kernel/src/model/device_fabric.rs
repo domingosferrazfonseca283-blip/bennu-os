@@ -131,6 +131,30 @@ impl DeviceFabric {
   }
   Err("USB device object not found")
  }
+ fn submit_bot_cbw(&mut self,device:ObjectId,token:u64,owner_cell:u64,command:super::ScsiCommand)->Result<(),&'static str> {
+  let mut target=None;
+  for i in 0..MAX_DEVICES { if self.usb_devices[i].object==device { target=Some(i); break; } }
+  let i=target.ok_or("USB mass-storage device not found")?;
+  let transport=self.mass_storage[i];
+  if !transport.valid() { return Err("mass-storage transport not ready"); }
+  let cbw= self.mass_storage[i].prepare_cbw(command);
+  let dma=super::xhci::allocate_dma_page()?;
+  unsafe { core::ptr::write_bytes(dma as *mut u8,0,super::xhci::XHCI_PAGE_SIZE as usize); }
+  let mut bytes=[0u8;super::usb::USB_BOT_CBW_LENGTH];
+  cbw.encode(&mut bytes);
+  unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(),dma as *mut u8,bytes.len()); }
+  let controller=self.usb_devices[i].controller;
+  let slot=self.usb_devices[i].slot;
+  for c in 0..self.controller_count {
+   if self.controllers[c].object!=controller { continue; }
+   let ring=super::xhci::enqueue_bulk_transfer(&mut self.controllers[c],slot,transport.bulk_out,dma,super::usb::USB_BOT_CBW_LENGTH as u32)?;
+   let p=(0..MAX_PENDING_TRANSFERS).find(|x| !self.transfers[*x].valid).ok_or("BOT transfer tracking full")?;
+   self.transfers[p]=PendingTransfer{valid:true,device,token,slot,ring,completion_trb:ring,owner_cell,user_buffer:0,dma_buffer:dma,length:super::usb::USB_BOT_CBW_LENGTH as u64,operation:9,phase:1,endpoint:transport.bulk_out};
+   return Ok(());
+  }
+  Err("mass-storage controller unavailable")
+ }
+ 
  pub fn configure_mass_storage_endpoints(&mut self,device:ObjectId,token:u64,owner_cell:u64)->Result<usize,&'static str> {
   for i in 0..MAX_DEVICES {
    if self.usb_devices[i].object!=device { continue; }
