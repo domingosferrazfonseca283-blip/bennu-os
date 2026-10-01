@@ -5,6 +5,7 @@ STAGE1=build/stage1.bin
 STAGE2=build/stage2.bin
 IMAGE=build/bennu.img
 MAX_EARLY_KERNEL_SECTORS=120
+KERNEL_ELF = $(shell find kernel/target -type f -path '*/release/bennu-kernel' -print -quit)
 
 .PHONY: all image clean
 
