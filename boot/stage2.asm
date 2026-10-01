@@ -16,6 +16,8 @@ ORG 0x8000
 %define BIOS_CHUNK_SECTORS 64
 
 %define BOOT_INFO        0x5000
+%define VBE_MODE_INFO   0x5400
+%define VBE_MODE        0x118
 %define MEMORY_MAP       0x5100
 %define STACK_TOP        0x80000
 %define PML4             0x90000
@@ -42,7 +44,7 @@ start2:
     mov dword [BOOT_INFO + 0], 0x554F5301
     mov dword [BOOT_INFO + 4], 0x42454E4E
     mov dword [BOOT_INFO + 8], 1
-    mov dword [BOOT_INFO + 12], 56
+    mov dword [BOOT_INFO + 12], 80
     mov byte  [BOOT_INFO + 16], dl
 
     mov dword [BOOT_INFO + 24], KERNEL_LOAD
@@ -53,6 +55,12 @@ start2:
     mov dword [BOOT_INFO + 40], MEMORY_MAP
     mov dword [BOOT_INFO + 48], 0
     mov dword [BOOT_INFO + 52], E820_ENTRY_SIZE
+    mov dword [BOOT_INFO + 56], 0
+    mov dword [BOOT_INFO + 60], 0
+    mov dword [BOOT_INFO + 64], 0
+    mov dword [BOOT_INFO + 68], 0
+    mov dword [BOOT_INFO + 72], 0
+    mov dword [BOOT_INFO + 76], 0
 
     ; Clear the E820 destination area before BIOS writes variable-sized entries.
     mov di, MEMORY_MAP
@@ -70,6 +78,10 @@ start2:
 
     mov ax, [e820_count]
     mov [BOOT_INFO + 48], ax
+
+    ; Ask the BIOS for a linear 32-bit framebuffer before leaving real mode.
+    ; Mode 118h is the standard 1024x768 32-bpp VBE mode when exposed.
+    call setup_vbe
 
     ; Stream the kernel through a bounded BIOS transfer buffer and copy
     ; each chunk to its final address in extended memory.
@@ -136,7 +148,7 @@ detect_memory_map:
 
 load_kernel:
     mov word [kernel_remaining],KERNEL_SECTORS
-    mov dword [kernel_lba],5
+    mov dword [kernel_lba],9
     mov dword [kernel_dest],KERNEL_LOAD
 .next:
     cmp word [kernel_remaining],0
@@ -231,7 +243,54 @@ dap_count:
     dw 0x0000
     dw 0x1000
 dap_lba:
-    dq 5
+    dq 9
+
+setup_vbe:
+    push ds
+    push es
+    xor ax, ax
+    mov ds, ax
+    mov es, ax
+    mov di, VBE_MODE_INFO
+    xor ax, ax
+    mov cx, 128
+    rep stosd
+
+    mov ax, 0x4F01
+    mov cx, VBE_MODE
+    mov di, VBE_MODE_INFO
+    int 0x10
+    cmp ax, 0x004F
+    jne .done
+
+    mov ax, [VBE_MODE_INFO + 0]
+    test ax, 0x0081
+    jz .done
+    cmp byte [VBE_MODE_INFO + 25], 32
+    jne .done
+
+    mov ax, 0x4F02
+    mov bx, VBE_MODE | 0x4000
+    mov di, VBE_MODE_INFO
+    int 0x10
+    cmp ax, 0x004F
+    jne .done
+
+    mov eax, [VBE_MODE_INFO + 40]
+    mov [BOOT_INFO + 56], eax
+    mov dword [BOOT_INFO + 60], 0
+    movzx eax, word [VBE_MODE_INFO + 16]
+    mov [BOOT_INFO + 64], eax
+    movzx eax, word [VBE_MODE_INFO + 18]
+    mov [BOOT_INFO + 68], eax
+    movzx eax, word [VBE_MODE_INFO + 20]
+    mov [BOOT_INFO + 72], eax
+    movzx eax, byte [VBE_MODE_INFO + 25]
+    mov [BOOT_INFO + 76], eax
+.done:
+    pop es
+    pop ds
+    ret
 
 BITS 32
 protected_mode:
@@ -294,4 +353,4 @@ gdt_descriptor:
     dw gdt_descriptor - gdt - 1
     dd gdt
 
-times 2048-($-$$) db 0
+times 4096-($-$) db 0
