@@ -75,11 +75,17 @@ impl Scheduler {
             self.cursor = (index + 1) % MAX_CELLS;
             CURRENT_CELL.store(id.0, Ordering::Release);
 
+            if super::runtime::start_cell(id).is_err() {
+                continue;
+            }
+
             unsafe {
                 if execution::switch_to_cell(context, address_space_root).is_ok() {
                     return Some(id);
                 }
             }
+
+            let _ = super::runtime::finish_cell(id, CellAction::Yield);
         }
 
         None
