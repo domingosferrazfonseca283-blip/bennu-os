@@ -56,8 +56,10 @@ impl Superblock {
         }
 
         let journal_start = BENNUFS_METADATA_START;
-        let metadata_blocks = journal_start
-            .checked_add(journal_blocks)?;
+        let metadata_blocks = match journal_start.checked_add(journal_blocks) {
+            Some(value) => value,
+            None => return None,
+        };
         if metadata_blocks >= total_blocks {
             return None;
         }
@@ -132,7 +134,7 @@ impl Node {
 
     pub const fn valid_extent(&self, total_blocks: u64) -> bool {
         if self.id.is_null() {
-            return self.kind == NodeKind::Free
+            return self.kind as u8 == NodeKind::Free as u8
                 && self.size == 0
                 && self.block_count == 0;
         }
