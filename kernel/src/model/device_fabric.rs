@@ -7,8 +7,8 @@ pub const MAX_PENDING_TRANSFERS:usize=64;
 
 #[repr(C)]
 #[derive(Clone,Copy)]
-pub struct PendingTransfer { pub valid:bool,pub device:ObjectId,pub token:u64,pub slot:u8,pub ring:u64,pub completion_trb:u64,pub owner_cell:u64,pub user_buffer:u64,pub dma_buffer:u64,pub length:u64,pub operation:u8,pub phase:u8,pub endpoint:u8,pub bot_tag:u32,pub bot_transfer_length:u32,pub bot_direction_in:bool,pub bot_command:u8 }
-impl PendingTransfer { pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,slot:0,ring:0,completion_trb:0,owner_cell:0,user_buffer:0,dma_buffer:0,length:0,operation:0,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0}; }
+pub struct PendingTransfer { pub valid:bool,pub device:ObjectId,pub token:u64,pub slot:u8,pub ring:u64,pub completion_trb:u64,pub owner_cell:u64,pub user_buffer:u64,pub dma_buffer:u64,pub length:u64,pub operation:u8,pub phase:u8,pub endpoint:u8,pub bot_tag:u32,pub bot_transfer_length:u32,pub bot_direction_in:bool,pub bot_command:u8,pub bot_data_dma:u64 }
+impl PendingTransfer { pub const EMPTY:Self=Self{valid:false,device:ObjectId::NULL,token:0,slot:0,ring:0,completion_trb:0,owner_cell:0,user_buffer:0,dma_buffer:0,length:0,operation:0,phase:0,endpoint:0,bot_tag:0,bot_transfer_length:0,bot_direction_in:false,bot_command:0,bot_data_dma:0}; }
 
 #[repr(C)]
 #[derive(Clone,Copy)]
@@ -202,7 +202,7 @@ impl DeviceFabric {
    let ring=super::xhci::enqueue_bulk_transfer(&mut self.controllers[c],slot,ep,dma,t.bot_transfer_length)?;
    let p=(0..MAX_PENDING_TRANSFERS).find(|x| !self.transfers[*x].valid).ok_or("BOT data tracking full")?;
    let mut next=t;
-   next.ring=ring; next.completion_trb=ring; next.dma_buffer=dma; next.length=t.bot_transfer_length as u64;
+   next.ring=ring; next.completion_trb=ring; next.dma_buffer=dma; next.bot_data_dma=dma; next.length=t.bot_transfer_length as u64;
    next.operation=10; next.phase=2; next.endpoint=ep;
    self.transfers[p]=next;
    return Ok(());
@@ -284,7 +284,7 @@ impl DeviceFabric {
   self.transfers[p]=PendingTransfer{
    valid:true,device:request.device,token:request.token,slot,ring,completion_trb:ring,
    owner_cell:request.owner_cell,user_buffer:request.buffer,dma_buffer:dma,length:request.length,
-   operation:request.opcode as u8,phase:0,endpoint,bot_tag:0,bot_transfer_length:0,bot_direction_in:in_direction,bot_command:0,
+   operation:request.opcode as u8,phase:0,endpoint,bot_tag:0,bot_transfer_length:0,bot_direction_in:in_direction,bot_command:0,bot_data_dma:0,
   };
   Ok(())
  }
@@ -386,7 +386,7 @@ impl DeviceFabric {
           let _=self.submit_bot_cbw(t.device,t.token.wrapping_add(1),t.owner_cell,super::ScsiCommand::read_capacity10(),0,8);
          } else if t.bot_command==0x25 {
           unsafe {
-           let p=t.dma_buffer as *const u8;
+           let p=t.bot_data_dma as *const u8;
            let last=((core::ptr::read_volatile(p) as u32)<<24)|((core::ptr::read_volatile(p.add(1)) as u32)<<16)|((core::ptr::read_volatile(p.add(2)) as u32)<<8)|core::ptr::read_volatile(p.add(3)) as u32;
            let block=((core::ptr::read_volatile(p.add(4)) as u32)<<24)|((core::ptr::read_volatile(p.add(5)) as u32)<<16)|((core::ptr::read_volatile(p.add(6)) as u32)<<8)|core::ptr::read_volatile(p.add(7)) as u32;
            if block!=0 {
