@@ -306,11 +306,26 @@ pub fn format_block_device(total_blocks: u64, root_object: ObjectId, out: &mut [
 pub fn recover_journal(superblock: &Superblock, records: &[JournalRecord]) -> u64 {
     if !superblock.valid() { return 0; }
     let mut highest = superblock.sequence;
+    let mut transaction_sequence = 0u64;
+    let mut committed_sequence = 0u64;
     for record in records {
-        if record.valid_for(superblock) && record.sequence > highest {
-            highest = record.sequence;
+        if !record.valid_for(superblock) { continue; }
+        if record.sequence < superblock.sequence { continue; }
+        match record.operation {
+            JournalOp::Begin => transaction_sequence = record.sequence,
+            JournalOp::Commit if transaction_sequence == record.sequence => {
+                committed_sequence = record.sequence;
+                transaction_sequence = 0;
+            }
+            JournalOp::Checkpoint => {
+                if record.sequence > committed_sequence {
+                    committed_sequence = record.sequence;
+                }
+            }
+            _ => {}
         }
     }
+    if committed_sequence > highest { highest = committed_sequence; }
     highest
 }
 
