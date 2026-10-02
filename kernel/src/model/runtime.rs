@@ -221,20 +221,34 @@ fn create_object_with_pages(
     }
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
+
+    // The frame allocator is currently monotonic, so a partial multi-page
+    // allocation cannot be rolled back. Check capacity before consuming any
+    // frame, then publish the object only after every backing page exists.
+    if matches!(kind, ObjectKind::Memory | ObjectKind::Data)
+        && crate::memory::available_frames() < pages as u64
+    {
+        return Err("insufficient physical memory for object");
+    }
+
     for offset in 0..MAX_OBJECTS {
         let index = (state.next_object + offset) % MAX_OBJECTS;
         if index == 0 || state.objects[index].kind != ObjectKind::Empty { continue; }
+
         let generation = state.generations[index].wrapping_add(1).max(1);
-        state.generations[index] = generation;
         let id = ObjectId::new(index as u32, generation);
-        state.objects[index] = ResourceObject { id, kind, owner, flags: 0 };
-        state.memory_frames[index] = [0; MAX_MEMORY_PAGES];
+        let mut frames = [0u64; MAX_MEMORY_PAGES];
+
         if matches!(kind, ObjectKind::Memory | ObjectKind::Data) {
             for page in 0..pages {
-                state.memory_frames[index][page] = crate::memory::allocate_frame_below(64 * 1024 * 1024)
-                    .ok_or("no physical frame for memory object")?;
+                frames[page] = crate::memory::allocate_frame_below(64 * 1024 * 1024)
+                    .ok_or("physical memory changed during allocation")?;
             }
         }
+
+        state.generations[index] = generation;
+        state.objects[index] = ResourceObject { id, kind, owner, flags: 0 };
+        state.memory_frames[index] = frames;
         state.next_object = (index + 1) % MAX_OBJECTS;
         let _ = emit_unlocked(state, Event::new(EventKind::ResourceCreated, id, ObjectId::NULL, 0));
         return Ok(id);
