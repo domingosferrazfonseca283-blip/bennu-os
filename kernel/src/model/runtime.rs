@@ -228,6 +228,37 @@ fn emit_unlocked(state: &mut RuntimeState, event: Event) -> Result<(), &'static 
     Ok(())
 }
 
+fn submit_bennufs_probe_read(
+    device: ObjectId,
+    buffer: ObjectId,
+    owner: CellId,
+    lba: u64,
+    token: u64,
+) -> Result<(), &'static str> {
+    let request = super::BlockRequest {
+        owner_cell: owner.0 as u64,
+        operation: super::BlockOp::Read,
+        device,
+        lba,
+        blocks: 1,
+        buffer: BENNUFS_PROBE_ADDRESS,
+        token,
+    };
+    let block = {
+        let guard = RUNTIME.lock();
+        let state = guard.get();
+        let mut found = super::BlockDevice::EMPTY;
+        for i in 0..super::storage::MAX_BLOCK_DEVICES {
+            if state.block_devices[i].object == device {
+                found = state.block_devices[i];
+                break;
+            }
+        }
+        found
+    };
+    super::io_fabric::submit(request, block, false)
+}
+
 pub fn prepare_bennufs_mount(device: ObjectId) -> Result<(), &'static str> {
     let (geometry, owner) = {
         let guard = RUNTIME.lock();
