@@ -1,4 +1,4 @@
-use super::graphics::PixelFormat;
+use super::graphics::{self, PixelFormat};
 use super::object::ObjectId;
 use super::sync::SpinLock;
 
@@ -12,7 +12,7 @@ pub struct Surface {
     pub height: u32,
     pub stride: u32,
     pub format: PixelFormat,
-    pub buffer: u64,
+    pub buffer: ObjectId,
 }
 
 impl Surface {
@@ -22,14 +22,10 @@ impl Surface {
         height: 0,
         stride: 0,
         format: PixelFormat::Unknown,
-        buffer: 0,
+        buffer: ObjectId::NULL,
     };
 
     pub const fn bytes_per_pixel(&self) -> Option<u32> {
-        self.format_to_bpp()
-    }
-
-    const fn format_to_bpp(&self) -> Option<u32> {
         match self.format {
             PixelFormat::Rgba8888 | PixelFormat::Bgra8888 => Some(4),
             PixelFormat::Unknown => None,
@@ -37,7 +33,7 @@ impl Surface {
     }
 
     pub const fn required_bytes(&self) -> Option<u64> {
-        let bpp = match self.format_to_bpp() {
+        let bpp = match self.bytes_per_pixel() {
             Some(value) => value as u64,
             None => return None,
         };
@@ -52,7 +48,7 @@ impl Surface {
     }
 
     pub const fn valid(&self) -> bool {
-        if self.object.is_null() || self.buffer == 0 {
+        if self.object.is_null() || self.buffer.is_null() {
             return false;
         }
         self.required_bytes().is_some()
@@ -70,18 +66,19 @@ pub fn attach(
     object: ObjectId,
     width: u32,
     height: u32,
-    buffer: u64,
+    buffer: ObjectId,
 ) -> Result<usize, &'static str> {
-    if object.is_null() || width == 0 || height == 0 || buffer == 0 {
+    if object.is_null() || width == 0 || height == 0 || buffer.is_null() {
         return Err("invalid surface");
     }
 
-    let stride = width.checked_mul(4).ok_or("surface stride overflow")?;
-    let format = PixelFormat::Rgba8888;
-    let required = (stride as u64)
-        .checked_mul(height as u64)
-        .ok_or("surface size overflow")?;
+    let backing = graphics::get(buffer).ok_or("graphics buffer is not registered")?;
+    if backing.width < width || backing.height < height {
+        return Err("graphics buffer is smaller than surface");
+    }
 
+    let stride = backing.stride;
+    let format = backing.format;
     let value = Surface {
         object,
         width,
@@ -91,7 +88,7 @@ pub fn attach(
         buffer,
     };
 
-    if !value.valid() || required == 0 {
+    if !value.valid() {
         return Err("invalid surface buffer");
     }
 
