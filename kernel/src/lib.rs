@@ -56,6 +56,7 @@ fn init_graphics_surface(boot_info: &boot_info::BootInfo) {
 
     if model::graphics::register(model::Buffer {
         object: memory,
+        owner: model::CellId(0),
         address: mapped,
         size: memory::PAGE_SIZE,
         stride,
