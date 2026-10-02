@@ -7,6 +7,7 @@ use super::allocate_frame_below;
 pub const PAGE_SIZE: u64 = 4096;
 pub const HEAP_BASE: u64 = 64 * 1024 * 1024;
 pub const HEAP_SIZE: u64 = 8 * 1024 * 1024;
+const USER_ADDRESS_LIMIT: u64 = 0x0000_8000_0000_0000;
 
 const PAGE_TABLE_ENTRIES: usize = 512;
 const PRESENT: u64 = 1 << 0;
@@ -140,6 +141,12 @@ fn map_page_in_root_with_flags(
     if virtual_address & (PAGE_SIZE - 1) != 0 || physical_frame & (PAGE_SIZE - 1) != 0 {
         return Err("unaligned page mapping");
     }
+    if user && virtual_address >= USER_ADDRESS_LIMIT {
+        return Err("user mapping outside canonical user range");
+    }
+    if user && virtual_address.checked_add(PAGE_SIZE).is_none_or(|end| end > USER_ADDRESS_LIMIT) {
+        return Err("user mapping crosses user address limit");
+    }
 
     let pml4_index = ((virtual_address >> 39) & 0x1ff) as usize;
     let pdpt_index = ((virtual_address >> 30) & 0x1ff) as usize;
@@ -257,11 +264,11 @@ pub fn validate_user_buffer(
     length: u64,
     write: bool,
 ) -> bool {
-    if length == 0 || base >= 0x0000_8000_0000_0000 {
+    if length == 0 || base >= USER_ADDRESS_LIMIT {
         return false;
     }
     let end = match base.checked_add(length - 1) {
-        Some(end) if end < 0x0000_8000_0000_0000 => end,
+        Some(end) if end < USER_ADDRESS_LIMIT => end,
         _ => return false,
     };
 
