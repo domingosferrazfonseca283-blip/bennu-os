@@ -1,7 +1,18 @@
 use super::{graphics, surface, window, WindowId};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 pub const MAX_COMPOSITION_WINDOWS: usize = window::MAX_WINDOWS;
 pub const MAX_VISIBLE_RECTS: usize = MAX_COMPOSITION_WINDOWS * 4 + 4;
+
+static COMPOSITION_DIRTY: AtomicBool = AtomicBool::new(false);
+
+pub fn mark_dirty() {
+    COMPOSITION_DIRTY.store(true, Ordering::Release);
+}
+
+pub fn take_dirty() -> bool {
+    COMPOSITION_DIRTY.swap(false, Ordering::AcqRel)
+}
 
 #[derive(Clone, Copy)]
 pub struct CompositionEntry {
