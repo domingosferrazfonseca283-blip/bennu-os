@@ -17,6 +17,33 @@ extern "C" fn bootstrap_cell() -> model::CellAction {
     model::CellAction::Stop
 }
 
+fn render_compositor(boot_info: &boot_info::BootInfo) {
+    if !model::compositor::take_dirty() {
+        return;
+    }
+
+    let mut commands = [model::compositor::CompositionCommand {
+        window: model::WindowId::NULL,
+        surface: model::ObjectId::NULL,
+        source_x: 0,
+        source_y: 0,
+        destination_x: 0,
+        destination_y: 0,
+        width: 0,
+        height: 0,
+        buffer: 0,
+        stride: 0,
+        format: model::PixelFormat::Unknown,
+    }; model::compositor::MAX_VISIBLE_RECTS];
+
+    let count = model::compositor::build_visible_commands(
+        boot_info.framebuffer_width,
+        boot_info.framebuffer_height,
+        &mut commands,
+    );
+    let _ = graphics::present(boot_info, &commands[..count]);
+}
+
 fn init_graphics_surface(boot_info: &boot_info::BootInfo) {
     let memory = match model::runtime::create_object(model::ObjectKind::Memory, 0) {
         Ok(object) => object,
@@ -317,6 +344,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         model::runtime::service_block_io();
         model::runtime::service_device_io();
         model::runtime::service_device_events();
+        render_compositor(boot_info);
         if scheduler.step().is_none() {
             core::hint::spin_loop();
         }
