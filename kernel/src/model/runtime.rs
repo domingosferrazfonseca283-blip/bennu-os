@@ -7,6 +7,8 @@ use super::sync::SpinLock;
 const EVENT_QUEUE_SIZE: usize = 128;
 const MAX_MEMORY_PAGES: usize = 256;
 const MAX_BENNUFS_MOUNTS: usize = 16;
+const BENNUFS_PROBE_ADDRESS: u64 = 0x0000_0070_0000_0000;
+const BENNUFS_PROBE_TOKEN_BASE: u64 = 0x4245_4e4e_5546_5300;
 
 struct RuntimeState {
     objects: [ResourceObject; MAX_OBJECTS],
@@ -19,6 +21,9 @@ struct RuntimeState {
     memory_frames: [[u64; MAX_MEMORY_PAGES]; MAX_OBJECTS],
     block_devices: [super::BlockDevice; super::storage::MAX_BLOCK_DEVICES],
     bennufs_mounts: [super::filesystem::BennuFsMount; MAX_BENNUFS_MOUNTS],
+    bennufs_probe_device: ObjectId,
+    bennufs_probe_token: u64,
+    bennufs_probe_buffer: ObjectId,
 }
 
 impl RuntimeState {
@@ -33,6 +38,9 @@ impl RuntimeState {
         memory_frames: [[0; MAX_MEMORY_PAGES]; MAX_OBJECTS],
         block_devices: [super::BlockDevice::EMPTY; super::storage::MAX_BLOCK_DEVICES],
         bennufs_mounts: [super::filesystem::BennuFsMount::EMPTY; MAX_BENNUFS_MOUNTS],
+        bennufs_probe_device: ObjectId::NULL,
+        bennufs_probe_token: 0,
+        bennufs_probe_buffer: ObjectId::NULL,
     };
 }
 
@@ -114,6 +122,9 @@ pub fn service_device_events() {
     let completion = DEVICE_FABRIC.lock().get_mut().service_events();
     if let Some((device, token, slot, completion_code, operation, owner_cell, descriptor)) = completion {
         let mut published = super::ObjectId::NULL;
+        if operation == 11 {
+            complete_bennufs_probe(token, completion_code);
+        }
         if operation == 1 && completion_code == 1 {
             let _ = DEVICE_FABRIC.lock().get_mut().continue_usb_enumeration(
                 device, slot, 1, owner_cell, token
@@ -206,18 +217,20 @@ fn emit_unlocked(state: &mut RuntimeState, event: Event) -> Result<(), &'static 
 }
 
 pub fn prepare_bennufs_mount(device: ObjectId) -> Result<(), &'static str> {
-    let mut guard = RUNTIME.lock();
-    let state = guard.get_mut();
-
-    let mut geometry = None;
-    for i in 0..super::storage::MAX_BLOCK_DEVICES {
-        let block = state.block_devices[i];
-        if block.object == device {
-            geometry = Some(block.geometry);
-            break;
+    let (geometry, owner) = {
+        let guard = RUNTIME.lock();
+        let state = guard.get();
+        let mut geometry = None;
+        for i in 0..super::storage::MAX_BLOCK_DEVICES {
+            let block = state.block_devices[i];
+            if block.object == device {
+                geometry = Some(block.geometry);
+                break;
+            }
         }
-    }
-    let geometry = geometry.ok_or("block device not found")?;
+        (geometry.ok_or("block device not found")?, CellId(2))
+    };
+
     if !super::filesystem::validate_block_geometry(
         geometry.block_size,
         geometry.block_count,
@@ -225,33 +238,151 @@ pub fn prepare_bennufs_mount(device: ObjectId) -> Result<(), &'static str> {
         return Err("block device geometry is incompatible with BennuFS");
     }
 
-    for i in 0..MAX_BENNUFS_MOUNTS {
-        if state.bennufs_mounts[i].mounted && state.bennufs_mounts[i].device == device {
-            return Ok(());
+    {
+        let guard = RUNTIME.lock();
+        let state = guard.get();
+        for i in 0..MAX_BENNUFS_MOUNTS {
+            if state.bennufs_mounts[i].mounted && state.bennufs_mounts[i].device == device {
+                return Ok(());
+            }
+        }
+        if !state.bennufs_probe_device.is_null() {
+            return Err("another BennuFS superblock probe is pending");
         }
     }
 
-    let root = state.cells[0].root;
-    let mount = super::filesystem::BennuFsMount::from_geometry(
-        device,
-        geometry.block_size,
-        geometry.block_count,
-        root,
-    ).ok_or("unable to build BennuFS mount")?;
+    let buffer = create_memory_object(owner.0, 1)?;
+    let capability = grant(
+        owner,
+        buffer,
+        super::CapabilityRights::READ
+            .union(super::CapabilityRights::WRITE)
+            .union(super::CapabilityRights::MAP),
+    )?;
+    let _ = memory_map(owner, capability, buffer, BENNUFS_PROBE_ADDRESS, true)?;
 
+    let token = BENNUFS_PROBE_TOKEN_BASE
+        .wrapping_add(device.0 as u64)
+        .wrapping_add(1);
+    let request = super::BlockRequest {
+        owner_cell: owner.0 as u64,
+        operation: super::BlockOp::Read,
+        device,
+        lba: super::filesystem::BENNUFS_SUPERBLOCK_BLOCK,
+        blocks: 1,
+        buffer: BENNUFS_PROBE_ADDRESS,
+        token,
+    };
+    super::io_fabric::submit(request, {
+        let guard = RUNTIME.lock();
+        let state = guard.get();
+        let mut found = super::BlockDevice::EMPTY;
+        for i in 0..super::storage::MAX_BLOCK_DEVICES {
+            if state.block_devices[i].object == device {
+                found = state.block_devices[i];
+                break;
+            }
+        }
+        found
+    }, false)?;
+
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+    state.bennufs_probe_device = device;
+    state.bennufs_probe_token = token;
+    state.bennufs_probe_buffer = buffer;
+    Ok(())
+}
+
+pub fn complete_bennufs_probe(token: u64, completion_code: u8) {
+    let (device, buffer) = {
+        let guard = RUNTIME.lock();
+        let state = guard.get();
+        if state.bennufs_probe_token != token
+            || state.bennufs_probe_device.is_null()
+        {
+            return;
+        }
+        (state.bennufs_probe_device, state.bennufs_probe_buffer)
+    };
+
+    if completion_code != 1 {
+        let mut guard = RUNTIME.lock();
+        let state = guard.get_mut();
+        state.bennufs_probe_device = ObjectId::NULL;
+        state.bennufs_probe_token = 0;
+        state.bennufs_probe_buffer = ObjectId::NULL;
+        return;
+    }
+
+    let mut bytes = [0u8; super::filesystem::BENNUFS_BLOCK_SIZE as usize];
+    let root = match cell_address_space_root(CellId(2)) {
+        Some(value) if value != 0 => value,
+        _ => return,
+    };
+    if super::memory::copy_from_user(root, &mut bytes, BENNUFS_PROBE_ADDRESS, bytes.len() as u64).is_err() {
+        return;
+    }
+
+    let superblock = match super::filesystem::deserialize_superblock(&bytes) {
+        Some(value) => value,
+        None => {
+            let mut guard = RUNTIME.lock();
+            let state = guard.get_mut();
+            state.bennufs_probe_device = ObjectId::NULL;
+            state.bennufs_probe_token = 0;
+            state.bennufs_probe_buffer = ObjectId::NULL;
+            return;
+        }
+    };
+
+    let geometry_ok = {
+        let guard = RUNTIME.lock();
+        let state = guard.get();
+        let mut geometry = None;
+        for i in 0..super::storage::MAX_BLOCK_DEVICES {
+            if state.block_devices[i].object == device {
+                geometry = Some(state.block_devices[i].geometry);
+                break;
+            }
+        }
+        geometry.map(|g| g.block_size == super::filesystem::BENNUFS_BLOCK_SIZE
+            && g.block_count == superblock.total_blocks).unwrap_or(false)
+    };
+    if !geometry_ok {
+        let mut guard = RUNTIME.lock();
+        let state = guard.get_mut();
+        state.bennufs_probe_device = ObjectId::NULL;
+        state.bennufs_probe_token = 0;
+        state.bennufs_probe_buffer = ObjectId::NULL;
+        return;
+    }
+
+    let mount = super::filesystem::BennuFsMount {
+        device,
+        superblock,
+        mounted: true,
+    };
+
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
     for i in 0..MAX_BENNUFS_MOUNTS {
         if !state.bennufs_mounts[i].mounted {
             state.bennufs_mounts[i] = mount;
-            let target = state.cells[0].root;
+            state.bennufs_probe_device = ObjectId::NULL;
+            state.bennufs_probe_token = 0;
+            state.bennufs_probe_buffer = ObjectId::NULL;
+            let target = state.cells[2].root;
             let _ = emit_unlocked(
                 state,
-                Event::new(EventKind::ResourceChanged, device, target, mount.superblock.sequence),
+                Event::new(EventKind::ResourceChanged, device, target, superblock.sequence),
             );
-            return Ok(());
+            return;
         }
     }
-
-    Err("BennuFS mount table full")
+    state.bennufs_probe_device = ObjectId::NULL;
+    state.bennufs_probe_token = 0;
+    state.bennufs_probe_buffer = ObjectId::NULL;
 }
 
 pub fn bennufs_mount(device: ObjectId) -> Option<super::filesystem::BennuFsMount> {
