@@ -6,6 +6,7 @@ use super::sync::SpinLock;
 
 const EVENT_QUEUE_SIZE: usize = 128;
 const MAX_MEMORY_PAGES: usize = 256;
+const MAX_BENNUFS_MOUNTS: usize = 16;
 
 struct RuntimeState {
     objects: [ResourceObject; MAX_OBJECTS],
@@ -17,6 +18,7 @@ struct RuntimeState {
     next_object: usize,
     memory_frames: [[u64; MAX_MEMORY_PAGES]; MAX_OBJECTS],
     block_devices: [super::BlockDevice; super::storage::MAX_BLOCK_DEVICES],
+    bennufs_mounts: [super::filesystem::BennuFsMount; MAX_BENNUFS_MOUNTS],
 }
 
 impl RuntimeState {
@@ -30,6 +32,7 @@ impl RuntimeState {
         next_object: 1,
         memory_frames: [[0; MAX_MEMORY_PAGES]; MAX_OBJECTS],
         block_devices: [super::BlockDevice::EMPTY; super::storage::MAX_BLOCK_DEVICES],
+        bennufs_mounts: [super::filesystem::BennuFsMount::EMPTY; MAX_BENNUFS_MOUNTS],
     };
 }
 
@@ -159,6 +162,7 @@ pub fn service_device_events() {
                         drop(guard);
                         let _ = DEVICE_FABRIC.lock().get_mut().bind_mass_storage_object(device, object);
                         let _ = grant(CellId(owner_cell as u32), object, super::CapabilityRights::READ.union(super::CapabilityRights::WRITE).union(super::CapabilityRights::DEVICE).union(super::CapabilityRights::OBSERVE));
+                        let _ = prepare_bennufs_mount(object);
                         published = object;
                     }
                 }
@@ -199,6 +203,66 @@ fn emit_unlocked(state: &mut RuntimeState, event: Event) -> Result<(), &'static 
     state.events[state.event_tail] = event;
     state.event_tail = next;
     Ok(())
+}
+
+pub fn prepare_bennufs_mount(device: ObjectId) -> Result<(), &'static str> {
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+
+    let mut geometry = None;
+    for i in 0..super::storage::MAX_BLOCK_DEVICES {
+        let block = state.block_devices[i];
+        if block.object == device {
+            geometry = Some(block.geometry);
+            break;
+        }
+    }
+    let geometry = geometry.ok_or("block device not found")?;
+    if !super::filesystem::validate_block_geometry(
+        geometry.block_size,
+        geometry.block_count,
+    ) {
+        return Err("block device geometry is incompatible with BennuFS");
+    }
+
+    for i in 0..MAX_BENNUFS_MOUNTS {
+        if state.bennufs_mounts[i].mounted && state.bennufs_mounts[i].device == device {
+            return Ok(());
+        }
+    }
+
+    let root = state.cells[0].root;
+    let mount = super::filesystem::BennuFsMount::from_geometry(
+        device,
+        geometry.block_size,
+        geometry.block_count,
+        root,
+    ).ok_or("unable to build BennuFS mount")?;
+
+    for i in 0..MAX_BENNUFS_MOUNTS {
+        if !state.bennufs_mounts[i].mounted {
+            state.bennufs_mounts[i] = mount;
+            let target = state.cells[0].root;
+            let _ = emit_unlocked(
+                state,
+                Event::new(EventKind::ResourceChanged, device, target, mount.superblock.sequence),
+            );
+            return Ok(());
+        }
+    }
+
+    Err("BennuFS mount table full")
+}
+
+pub fn bennufs_mount(device: ObjectId) -> Option<super::filesystem::BennuFsMount> {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    for i in 0..MAX_BENNUFS_MOUNTS {
+        if state.bennufs_mounts[i].mounted && state.bennufs_mounts[i].device == device {
+            return Some(state.bennufs_mounts[i]);
+        }
+    }
+    None
 }
 
 pub fn create_object(kind: ObjectKind, owner: u32) -> Result<ObjectId, &'static str> {
