@@ -233,7 +233,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     }
     arch::diagnostics::write_line(6, b"BENNU USER: RING3 CELL ONLINE");
 
-    if let Ok(memory_object) = model::runtime::create_object(model::ObjectKind::Memory, 2) {
+    if let Ok(memory_object) = model::runtime::create_memory_object(2, 16) {
         let _ = model::runtime::grant(
             model::CellId(2),
             memory_object,
