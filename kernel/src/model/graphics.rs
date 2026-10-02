@@ -64,10 +64,11 @@ impl Buffer {
         if self.object.is_null() || self.address == 0 || self.width == 0 || self.height == 0 {
             return false;
         }
-        match self.required_bytes() {
-            Some(bytes) => bytes <= self.size,
-            None => false,
-        }
+        let bytes = match self.required_bytes() {
+            Some(value) => value,
+            None => return false,
+        };
+        bytes <= self.size
     }
 }
 
