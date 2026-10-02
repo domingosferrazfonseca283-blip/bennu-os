@@ -5,6 +5,7 @@ use super::{
 use super::sync::SpinLock;
 
 const EVENT_QUEUE_SIZE: usize = 128;
+const MAX_MEMORY_PAGES: usize = 256;
 
 struct RuntimeState {
     objects: [ResourceObject; MAX_OBJECTS],
@@ -14,7 +15,7 @@ struct RuntimeState {
     event_head: usize,
     event_tail: usize,
     next_object: usize,
-    memory_frames: [u64; MAX_OBJECTS],
+    memory_frames: [[u64; MAX_MEMORY_PAGES]; MAX_OBJECTS],
     block_devices: [super::BlockDevice; super::storage::MAX_BLOCK_DEVICES],
 }
 
@@ -27,7 +28,7 @@ impl RuntimeState {
         event_head: 0,
         event_tail: 0,
         next_object: 1,
-        memory_frames: [0; MAX_OBJECTS],
+        memory_frames: [[0; MAX_MEMORY_PAGES]; MAX_OBJECTS],
         block_devices: [super::BlockDevice::EMPTY; super::storage::MAX_BLOCK_DEVICES],
     };
 }
@@ -201,13 +202,23 @@ fn emit_unlocked(state: &mut RuntimeState, event: Event) -> Result<(), &'static 
 }
 
 pub fn create_object(kind: ObjectKind, owner: u32) -> Result<ObjectId, &'static str> {
-    let backing = match kind {
-        ObjectKind::Memory | ObjectKind::Data => {
-            crate::memory::allocate_frame_below(64 * 1024 * 1024)
-                .ok_or("no physical frame for memory object")?
-        }
-        _ => 0,
-    };
+    create_object_with_pages(kind, owner, 1)
+}
+
+pub fn create_memory_object(owner: u32, pages: usize) -> Result<ObjectId, &'static str> {
+    create_object_with_pages(ObjectKind::Memory, owner, pages)
+}
+
+fn create_object_with_pages(
+    kind: ObjectKind,
+    owner: u32,
+    pages: usize,
+) -> Result<ObjectId, &'static str> {
+    if matches!(kind, ObjectKind::Memory | ObjectKind::Data)
+        && (pages == 0 || pages > MAX_MEMORY_PAGES)
+    {
+        return Err("invalid memory object size");
+    }
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
     for offset in 0..MAX_OBJECTS {
@@ -217,7 +228,13 @@ pub fn create_object(kind: ObjectKind, owner: u32) -> Result<ObjectId, &'static 
         state.generations[index] = generation;
         let id = ObjectId::new(index as u32, generation);
         state.objects[index] = ResourceObject { id, kind, owner, flags: 0 };
-        state.memory_frames[index] = backing;
+        state.memory_frames[index] = [0; MAX_MEMORY_PAGES];
+        if matches!(kind, ObjectKind::Memory | ObjectKind::Data) {
+            for page in 0..pages {
+                state.memory_frames[index][page] = crate::memory::allocate_frame_below(64 * 1024 * 1024)
+                    .ok_or("no physical frame for memory object")?;
+            }
+        }
         state.next_object = (index + 1) % MAX_OBJECTS;
         let _ = emit_unlocked(state, Event::new(EventKind::ResourceCreated, id, ObjectId::NULL, 0));
         return Ok(id);
@@ -232,8 +249,27 @@ pub fn object_frame(id: ObjectId) -> Option<u64> {
         return None;
     }
     let index = id.index();
-    let frame = state.memory_frames[index];
+    let frame = state.memory_frames[index][0];
     if frame == 0 { None } else { Some(frame) }
+}
+
+pub fn object_frames(id: ObjectId) -> Option<([u64; MAX_MEMORY_PAGES], usize)> {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    if !object_exists_unlocked(state, id) {
+        return None;
+    }
+    let kind = state.objects[id.index()].kind;
+    if !matches!(kind, ObjectKind::Memory | ObjectKind::Data) {
+        return None;
+    }
+    let mut frames = [0u64; MAX_MEMORY_PAGES];
+    let mut count = 0usize;
+    while count < MAX_MEMORY_PAGES && state.memory_frames[id.index()][count] != 0 {
+        frames[count] = state.memory_frames[id.index()][count];
+        count += 1;
+    }
+    Some((frames, count))
 }
 
 pub fn create_cell(id: CellId, root: ObjectId) -> Result<(), &'static str> {
@@ -456,8 +492,8 @@ pub fn memory_map(
         return Err("object is not mappable memory");
     }
 
-    let frame = state.memory_frames[object_index];
-    if frame == 0 {
+    let frames = state.memory_frames[object_index];
+    if frames[0] == 0 {
         return Err("memory object has no backing frame");
     }
     if writable && !state.cells[cell_index].permits(capability, object, CapabilityRights::WRITE) {
@@ -465,14 +501,25 @@ pub fn memory_map(
     }
 
     let root = state.cells[cell_index].address_space_root;
-    crate::memory::paging::map_user_page_in_root(
-        root,
-        virtual_address & !(crate::memory::PAGE_SIZE - 1),
-        frame,
-        writable,
-        false,
-    )?;
-    Ok(virtual_address & !(crate::memory::PAGE_SIZE - 1))
+    let base = virtual_address & !(crate::memory::PAGE_SIZE - 1);
+    for page in 0..MAX_MEMORY_PAGES {
+        let frame = frames[page];
+        if frame == 0 {
+            break;
+        }
+        let offset = (page as u64)
+            .checked_mul(crate::memory::PAGE_SIZE)
+            .ok_or("memory mapping offset overflow")?;
+        let va = base.checked_add(offset).ok_or("memory mapping address overflow")?;
+        crate::memory::paging::map_user_page_in_root(
+            root,
+            va,
+            frame,
+            writable,
+            false,
+        )?;
+    }
+    Ok(base)
 }
 
 pub fn delegate(
