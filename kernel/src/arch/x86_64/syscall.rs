@@ -1,5 +1,6 @@
 use crate::model::abi::{self, Call, Operation, ResultCode};
 use crate::model::{CapabilityId, ObjectId};
+use crate::model::graphics::Present;
 
 extern "C" { fn bennu_syscall_entry(); }
 
@@ -123,12 +124,55 @@ extern "C" fn bennu_syscall_dispatch(frame: *mut RegisterFrame) -> u64 {
         7 => Operation::SurfaceCreate,
         8 => Operation::DeviceSubmit,
         9 => Operation::Yield,
+        10 => Operation::Present,
         _ => return abi::ABI_STATUS_UNSUPPORTED,
     };
 
     if !valid_user_range(regs.rdx, if regs.r10 == 0 { 1 } else { regs.r10 }) && matches!(operation, Operation::MemoryMap | Operation::SurfaceCreate | Operation::DeviceSubmit) {
         regs.rax = abi::ABI_STATUS_INVALID;
         return abi::ABI_STATUS_INVALID;
+    }
+
+    if matches!(operation, Operation::Present) {
+        let root = match crate::model::runtime::cell_address_space_root(cell) {
+            Some(root) if root != 0 => root,
+            _ => {
+                regs.rax = abi::ABI_STATUS_INVALID;
+                return abi::ABI_STATUS_INVALID;
+            }
+        };
+        let length = core::mem::size_of::<Present>() as u64;
+        if !crate::memory::paging::validate_user_buffer(root, regs.rdx, length, false) {
+            regs.rax = abi::ABI_STATUS_INVALID;
+            return abi::ABI_STATUS_INVALID;
+        }
+
+        let mut bytes = [0u8; core::mem::size_of::<Present>()];
+        let mut offset = 0usize;
+        while offset < bytes.len() {
+            let address = match regs.rdx.checked_add(offset as u64) {
+                Some(value) => value,
+                None => {
+                    regs.rax = abi::ABI_STATUS_INVALID;
+                    return abi::ABI_STATUS_INVALID;
+                }
+            };
+            let physical = match crate::memory::paging::translate_user_address(root, address, false) {
+                Some(value) => value,
+                None => {
+                    regs.rax = abi::ABI_STATUS_INVALID;
+                    return abi::ABI_STATUS_INVALID;
+                }
+            };
+            bytes[offset] = unsafe { core::ptr::read_volatile(physical as *const u8) };
+            offset += 1;
+        }
+
+        let present = unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const Present) };
+        let result = abi::dispatch_present(cell, CapabilityId(regs.rdi), &present);
+        regs.rax = result.status;
+        regs.rdx = result.value;
+        return result.status;
     }
 
     if matches!(operation, Operation::DeviceSubmit) {
