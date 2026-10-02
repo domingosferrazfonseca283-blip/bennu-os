@@ -22,6 +22,8 @@ pub struct CompositionCommand {
     pub width: u32,
     pub height: u32,
     pub buffer: u64,
+    pub stride: u32,
+    pub format: super::graphics::PixelFormat,
 }
 
 #[derive(Clone, Copy)]
@@ -58,33 +60,17 @@ pub fn collect(out: &mut [CompositionEntry]) -> usize {
         let id = ids[scanned];
         if let Some(win) = window::get(id) {
             if let Some(value) = find_surface(win.surface) {
-                out[written] = CompositionEntry {
-                    window: win.id,
-                    surface: value,
-                    x: win.x,
-                    y: win.y,
-                };
+                out[written] = CompositionEntry { window: win.id, surface: value, x: win.x, y: win.y };
                 written += 1;
             }
         }
         scanned += 1;
     }
-
     written
 }
 
-pub fn build_commands(
-    screen_width: u32,
-    screen_height: u32,
-    out: &mut [CompositionCommand],
-) -> usize {
-    let mut entries = [CompositionEntry {
-        window: WindowId::NULL,
-        surface: surface::Surface::EMPTY,
-        x: 0,
-        y: 0,
-    }; MAX_COMPOSITION_WINDOWS];
-
+pub fn build_commands(screen_width: u32, screen_height: u32, out: &mut [CompositionCommand]) -> usize {
+    let mut entries = [CompositionEntry { window: WindowId::NULL, surface: surface::Surface::EMPTY, x: 0, y: 0 }; MAX_COMPOSITION_WINDOWS];
     let count = collect(&mut entries);
     let limit = core::cmp::min(count, out.len());
     let mut i = 0;
@@ -94,56 +80,25 @@ pub fn build_commands(
         let entry = entries[i];
         let width = entry.surface.width;
         let height = entry.surface.height;
-
         if width != 0 && height != 0 && entry.surface.buffer != 0 {
             let left = core::cmp::max(entry.x as i64, 0);
             let top = core::cmp::max(entry.y as i64, 0);
-            let right = core::cmp::min(
-                screen_width as i64,
-                entry.x as i64 + width as i64,
-            );
-            let bottom = core::cmp::min(
-                screen_height as i64,
-                entry.y as i64 + height as i64,
-            );
-
+            let right = core::cmp::min(screen_width as i64, entry.x as i64 + width as i64);
+            let bottom = core::cmp::min(screen_height as i64, entry.y as i64 + height as i64);
             if right > left && bottom > top {
-                let source_x = (left - entry.x as i64) as u32;
-                let source_y = (top - entry.y as i64) as u32;
-
-                out[written] = CompositionCommand {
-                    window: entry.window,
-                    surface: entry.surface.object,
-                    source_x,
-                    source_y,
-                    destination_x: left as u32,
-                    destination_y: top as u32,
-                    width: (right - left) as u32,
-                    height: (bottom - top) as u32,
-                    buffer: entry.surface.buffer,
-                };
+                out[written] = command_for_rect(entry, Rect {
+                    left: left as i32, top: top as i32, right: right as i32, bottom: bottom as i32,
+                });
                 written += 1;
             }
         }
-
         i += 1;
     }
-
     written
 }
 
-pub fn build_visible_commands(
-    screen_width: u32,
-    screen_height: u32,
-    out: &mut [CompositionCommand],
-) -> usize {
-    let mut entries = [CompositionEntry {
-        window: WindowId::NULL,
-        surface: surface::Surface::EMPTY,
-        x: 0,
-        y: 0,
-    }; MAX_COMPOSITION_WINDOWS];
-
+pub fn build_visible_commands(screen_width: u32, screen_height: u32, out: &mut [CompositionCommand]) -> usize {
+    let mut entries = [CompositionEntry { window: WindowId::NULL, surface: surface::Surface::EMPTY, x: 0, y: 0 }; MAX_COMPOSITION_WINDOWS];
     let count = collect(&mut entries);
     let mut written = 0;
     let mut index = count;
@@ -151,24 +106,15 @@ pub fn build_visible_commands(
     while index > 0 {
         index -= 1;
         let entry = entries[index];
-        if entry.surface.width == 0
-            || entry.surface.height == 0
-            || entry.surface.buffer == 0
-        {
+        if !entry.surface.valid() {
             continue;
         }
 
         let base = Rect {
             left: core::cmp::max(entry.x, 0),
             top: core::cmp::max(entry.y, 0),
-            right: core::cmp::min(
-                screen_width as i32,
-                entry.x.saturating_add(entry.surface.width as i32),
-            ),
-            bottom: core::cmp::min(
-                screen_height as i32,
-                entry.y.saturating_add(entry.surface.height as i32),
-            ),
+            right: core::cmp::min(screen_width as i32, entry.x.saturating_add(entry.surface.width as i32)),
+            bottom: core::cmp::min(screen_height as i32, entry.y.saturating_add(entry.surface.height as i32)),
         };
         if !base.valid() {
             continue;
@@ -177,38 +123,31 @@ pub fn build_visible_commands(
         let mut visible = [Rect::EMPTY; MAX_VISIBLE_RECTS];
         visible[0] = base;
         let mut visible_count = 1;
-
         let mut front = index + 1;
+
         while front < count && visible_count != 0 {
             let above = entries[front];
-            let cover = Rect {
-                left: core::cmp::max(above.x, 0),
-                top: core::cmp::max(above.y, 0),
-                right: core::cmp::min(
-                    screen_width as i32,
-                    above.x.saturating_add(above.surface.width as i32),
-                ),
-                bottom: core::cmp::min(
-                    screen_height as i32,
-                    above.y.saturating_add(above.surface.height as i32),
-                ),
-            };
-
-            if cover.valid() {
-                visible_count = subtract_rects(&mut visible, visible_count, &cover);
+            if above.surface.valid() {
+                let cover = Rect {
+                    left: core::cmp::max(above.x, 0),
+                    top: core::cmp::max(above.y, 0),
+                    right: core::cmp::min(screen_width as i32, above.x.saturating_add(above.surface.width as i32)),
+                    bottom: core::cmp::min(screen_height as i32, above.y.saturating_add(above.surface.height as i32)),
+                };
+                if cover.valid() {
+                    visible_count = subtract_rects(&mut visible, visible_count, &cover);
+                }
             }
             front += 1;
         }
 
         let mut piece = 0;
         while piece < visible_count && written < out.len() {
-            let rect = visible[piece];
-            out[written] = command_for_rect(entry, rect);
+            out[written] = command_for_rect(entry, visible[piece]);
             written += 1;
             piece += 1;
         }
     }
-
     written
 }
 
@@ -227,7 +166,6 @@ fn subtract_rects(rects: &mut [Rect], count: usize, cover: &Rect) -> usize {
         let right = rect.right;
         let top = rect.top;
         let bottom = rect.bottom;
-
         current_count -= 1;
         rects[index] = rects[current_count];
 
@@ -247,23 +185,22 @@ fn subtract_rects(rects: &mut [Rect], count: usize, cover: &Rect) -> usize {
             p += 1;
         }
     }
-
     current_count
 }
 
 fn command_for_rect(entry: CompositionEntry, rect: Rect) -> CompositionCommand {
-    let source_x = (rect.left - entry.x) as u32;
-    let source_y = (rect.top - entry.y) as u32;
     CompositionCommand {
         window: entry.window,
         surface: entry.surface.object,
-        source_x,
-        source_y,
+        source_x: (rect.left - entry.x) as u32,
+        source_y: (rect.top - entry.y) as u32,
         destination_x: rect.left as u32,
         destination_y: rect.top as u32,
         width: (rect.right - rect.left) as u32,
         height: (rect.bottom - rect.top) as u32,
         buffer: entry.surface.buffer,
+        stride: entry.surface.stride,
+        format: entry.surface.format,
     }
 }
 
