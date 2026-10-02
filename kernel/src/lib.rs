@@ -17,6 +17,73 @@ extern "C" fn bootstrap_cell() -> model::CellAction {
     model::CellAction::Stop
 }
 
+fn init_graphics_surface(boot_info: &boot_info::BootInfo) {
+    let memory = match model::runtime::create_object(model::ObjectKind::Memory, 0) {
+        Ok(object) => object,
+        Err(_) => return,
+    };
+    let frame = match model::runtime::object_frame(memory) {
+        Some(frame) => frame,
+        None => return,
+    };
+    let mapped = match memory::paging::map_mmio(frame, memory::PAGE_SIZE) {
+        Ok(address) => address,
+        Err(_) => return,
+    };
+
+    let width = 32u32;
+    let height = 32u32;
+    let stride = width * 4;
+    unsafe {
+        let pixels = mapped as *mut u32;
+        for y in 0..height {
+            for x in 0..width {
+                let border = x == 0 || y == 0 || x == width - 1 || y == height - 1;
+                let value = if border {
+                    0xff40a0ff
+                } else if ((x / 4) + (y / 4)) & 1 == 0 {
+                    0xff182840
+                } else {
+                    0xff203048
+                };
+                core::ptr::write_volatile(pixels.add((y * width + x) as usize), value);
+            }
+        }
+    }
+
+    let surface = match model::runtime::create_object(model::ObjectKind::Surface, 0) {
+        Ok(object) => object,
+        Err(_) => return,
+    };
+    if model::surface::attach(surface, width, height, mapped).is_err() {
+        return;
+    }
+
+    if model::window::create(model::ObjectId::new(1, 1), surface, 40, 190, width, height).is_err() {
+        return;
+    }
+
+    let mut commands = [model::compositor::CompositionCommand {
+        window: model::WindowId::NULL,
+        surface: model::ObjectId::NULL,
+        source_x: 0,
+        source_y: 0,
+        destination_x: 0,
+        destination_y: 0,
+        width: 0,
+        height: 0,
+        buffer: 0,
+        stride: stride,
+        format: model::PixelFormat::Rgba8888,
+    }; model::compositor::MAX_VISIBLE_RECTS];
+    let count = model::compositor::build_visible_commands(
+        boot_info.framebuffer_width,
+        boot_info.framebuffer_height,
+        &mut commands,
+    );
+    let _ = graphics::present(boot_info, &commands[..count]);
+}
+
 pub fn init(boot_info: *const boot_info::BootInfo) {
     arch::init();
     drivers::keyboard::init();
@@ -76,6 +143,8 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         arch::diagnostics::write_line(6, b"BENNU VIDEO: FRAMEBUFFER ONLINE");
     }
 
+    init_graphics_surface(boot_info);
+
     unsafe { memory::heap::init(); }
     arch::diagnostics::write_line(6, b"BENNU MEMORY: KERNEL HEAP ONLINE");
 
@@ -90,10 +159,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         arch::diagnostics::write_line(1, b"BENNU USER: CELL CREATE FAILED");
         return;
     }
-    if model::runtime::prepare_cell_context(
-        model::CellId(2),
-        model::scheduler::cell_trampoline as usize as u64,
-    ).is_err() {
+    if model::runtime::prepare_cell_context(model::CellId(2), model::scheduler::cell_trampoline as usize as u64).is_err() {
         arch::diagnostics::write_line(1, b"BENNU USER: CELL CONTEXT FAILED");
         return;
     }
@@ -108,13 +174,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     arch::diagnostics::write_line(6, b"BENNU USER: RING3 CELL ONLINE");
 
     if let Ok(memory_object) = model::runtime::create_object(model::ObjectKind::Memory, 2) {
-        let _ = model::runtime::grant(
-            model::CellId(2),
-            memory_object,
-            model::CapabilityRights::READ
-                .union(model::CapabilityRights::WRITE)
-                .union(model::CapabilityRights::MAP),
-        );
+        let _ = model::runtime::grant(model::CellId(2), memory_object, model::CapabilityRights::READ.union(model::CapabilityRights::WRITE).union(model::CapabilityRights::MAP));
         arch::diagnostics::write_line(6, b"BENNU USER: MEMORY OBJECT + MAP CAPABILITY ONLINE");
     }
 
@@ -123,10 +183,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         return;
     }
 
-    if model::runtime::prepare_cell_context(
-        model::CellId(1),
-        model::scheduler::cell_trampoline as usize as u64,
-    ).is_err() {
+    if model::runtime::prepare_cell_context(model::CellId(1), model::scheduler::cell_trampoline as usize as u64).is_err() {
         arch::diagnostics::write_line(1, b"BENNU EXEC: CELL STACK PREP FAILED");
         return;
     }
@@ -149,11 +206,8 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
                                 arch::diagnostics::write_line(6, b"BENNU USB: xHCI DMA + RINGS ONLINE");
                                 match model::runtime::start_usb_enumeration(1) {
                                     Ok(count) => {
-                                        if count != 0 {
-                                            arch::diagnostics::write_line(6, b"BENNU USB: ENUMERATION QUEUED");
-                                        } else {
-                                            arch::diagnostics::write_line(6, b"BENNU USB: NO DEVICE ON ROOT PORTS");
-                                        }
+                                        if count != 0 { arch::diagnostics::write_line(6, b"BENNU USB: ENUMERATION QUEUED"); }
+                                        else { arch::diagnostics::write_line(6, b"BENNU USB: NO DEVICE ON ROOT PORTS"); }
                                     }
                                     Err(_) => arch::diagnostics::write_line(5, b"BENNU USB: ENUMERATION START FAILED"),
                                 }
