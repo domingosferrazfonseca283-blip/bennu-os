@@ -43,13 +43,20 @@ impl Buffer {
             Some(value) => value as u64,
             None => return None,
         };
+        let min_stride = match (self.width as u64).checked_mul(bpp) {
+            Some(value) => value,
+            None => return None,
+        };
+        if self.width == 0
+            || self.height == 0
+            || (self.stride as u64) < min_stride
+        {
+            return None;
+        }
         let row = match (self.stride as u64).checked_mul(self.height as u64) {
             Some(value) => value,
             None => return None,
         };
-        if self.width == 0 || self.height == 0 || (self.stride as u64) < self.width as u64 * bpp {
-            return None;
-        }
         row.checked_add(bpp)
     }
 
@@ -57,7 +64,10 @@ impl Buffer {
         if self.object.is_null() || self.address == 0 || self.width == 0 || self.height == 0 {
             return false;
         }
-        self.required_bytes().is_some_and(|bytes| bytes <= self.size)
+        match self.required_bytes() {
+            Some(bytes) => bytes <= self.size,
+            None => false,
+        }
     }
 }
 
