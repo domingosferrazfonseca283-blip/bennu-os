@@ -681,7 +681,9 @@ pub fn present_surface(
         present.surface,
         target,
         present.buffer.0,
-    ))
+    ))?;
+    super::compositor::mark_dirty();
+    Ok(())
 }
 
 pub fn object_exists(id: ObjectId) -> bool {
