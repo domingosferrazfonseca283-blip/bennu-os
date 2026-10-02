@@ -169,6 +169,10 @@ extern "C" fn bennu_syscall_dispatch(frame: *mut RegisterFrame) -> u64 {
         }
 
         let present = unsafe { core::ptr::read_unaligned(bytes.as_ptr() as *const Present) };
+        if !crate::model::runtime::validate_graphics_buffer_mapping(cell, present.buffer) {
+            regs.rax = abi::ABI_STATUS_INVALID;
+            return abi::ABI_STATUS_INVALID;
+        }
         let result = abi::dispatch_present(cell, CapabilityId(regs.rdi), &present);
         regs.rax = result.status;
         regs.rdx = result.value;
