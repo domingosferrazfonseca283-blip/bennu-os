@@ -631,6 +631,59 @@ pub fn poll() -> Option<Event> {
     Some(event)
 }
 
+pub fn object_owner(id: ObjectId) -> Option<CellId> {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    if !object_exists_unlocked(state, id) {
+        return None;
+    }
+    Some(CellId(state.objects[id.index()].owner))
+}
+
+pub fn present_surface(
+    cell: CellId,
+    capability: CapabilityId,
+    present: &super::graphics::Present,
+) -> Result<(), &'static str> {
+    if present.surface.is_null() || present.buffer.is_null()
+        || present.width == 0 || present.height == 0
+        || present.x < 0 || present.y < 0
+    {
+        return Err("invalid present request");
+    }
+
+    if !permits(cell, capability, present.surface, CapabilityRights::DRAW) {
+        return Err("surface draw capability denied");
+    }
+
+    let surface = super::surface::find_by_object(present.surface)
+        .ok_or("surface does not exist")?;
+
+    if object_owner(present.surface) != Some(cell) {
+        return Err("surface is not owned by Cell");
+    }
+    if surface.buffer != present.buffer {
+        return Err("present buffer does not match surface");
+    }
+    if super::graphics::get_for_owner(present.buffer, cell).is_none() {
+        return Err("present buffer is not owned by Cell");
+    }
+
+    let right = present.x as u64 + present.width as u64;
+    let bottom = present.y as u64 + present.height as u64;
+    if right > surface.width as u64 || bottom > surface.height as u64 {
+        return Err("present rectangle exceeds surface");
+    }
+
+    let target = cell_root_object(cell);
+    emit(super::Event::new(
+        EventKind::ResourceChanged,
+        present.surface,
+        target,
+        present.buffer.0,
+    ))
+}
+
 pub fn object_exists(id: ObjectId) -> bool {
     let guard = RUNTIME.lock();
     object_exists_unlocked(guard.get(), id)
