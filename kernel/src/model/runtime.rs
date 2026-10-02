@@ -320,7 +320,7 @@ pub fn complete_bennufs_probe(token: u64, completion_code: u8) {
         Some(value) if value != 0 => value,
         _ => return,
     };
-    if crate::memory::user::copy_from_user(root, &mut bytes, BENNUFS_PROBE_ADDRESS, bytes.len() as u64).is_err() {
+    if crate::memory::user::copy_from_user(root, bytes.as_mut_ptr(), BENNUFS_PROBE_ADDRESS, bytes.len() as u64).is_err() {
         return;
     }
 
