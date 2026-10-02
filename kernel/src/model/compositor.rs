@@ -12,18 +12,18 @@ pub fn collect(out: &mut [CompositionEntry]) -> usize {
     let mut ids = [WindowId::NULL; MAX_COMPOSITION_WINDOWS];
     let count = window::order(&mut ids);
     let limit = core::cmp::min(count, out.len());
+    let mut scanned = 0;
     let mut written = 0;
 
-    while written < limit {
-        if let Some(win) = window::get(ids[written]) {
+    while scanned < limit {
+        let id = ids[scanned];
+        if let Some(win) = window::get(id) {
             if let Some(surface) = find_surface(win.surface) {
-                out[written] = CompositionEntry {
-                    window: win.id,
-                    surface,
-                };
+                out[written] = CompositionEntry { window: win.id, surface };
                 written += 1;
             }
         }
+        scanned += 1;
     }
 
     written
