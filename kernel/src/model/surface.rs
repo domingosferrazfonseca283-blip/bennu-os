@@ -45,7 +45,7 @@ impl Surface {
             Some(value) => value,
             None => return None,
         };
-        if self.width == 0 || self.height == 0 || self.stride as u64 < minimum_stride {
+        if self.width == 0 || self.height == 0 || (self.stride as u64) < minimum_stride {
             return None;
         }
         (self.stride as u64).checked_mul(self.height as u64)
