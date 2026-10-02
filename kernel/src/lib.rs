@@ -9,8 +9,23 @@ pub mod graphics;
 pub mod drivers;
 pub mod process;
 
-fn arch_user_install(root: u64) -> Result<(), &'static str> {
-    arch::x86_64::userspace::install(model::CellId(2), root)
+const DEMO_BEXE: [u8; 33] = [
+    b'B', b'E', b'X', b'E',
+    1, 0,
+    0x3e, 0,
+    0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00,
+    9, 0, 0, 0, 0, 0, 0, 0,
+    0xb8, 9, 0, 0, 0,
+    0xcd, 0x80,
+    0xeb, 0xfc,
+];
+
+fn arch_user_install(cell: model::CellId, root: u64) -> Result<(), &'static str> {
+    let process = process::load_bexe(cell, root, &DEMO_BEXE)?;
+    if process.entry != process::USER_IMAGE_BASE {
+        return Err("demo BEXE entry was not installed at image base");
+    }
+    Ok(())
 }
 
 extern "C" fn bootstrap_cell() -> model::CellAction {
@@ -227,7 +242,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         Some(_) => model::runtime::cell_address_space_root(model::CellId(2)).unwrap_or(0),
         None => 0,
     };
-    if user_root == 0 || arch_user_install(user_root).is_err() {
+    if user_root == 0 || arch_user_install(model::CellId(2), user_root).is_err() {
         arch::diagnostics::write_line(1, b"BENNU USER: ADDRESS SPACE INSTALL FAILED");
         return;
     }
