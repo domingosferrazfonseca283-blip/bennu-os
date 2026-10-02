@@ -211,19 +211,26 @@ pub fn create(
     state.order[state.count] = id;
     state.count += 1;
     state.focused = id;
+    super::compositor::mark_dirty();
     Ok(id)
 }
 
 pub fn bring_to_front(id: WindowId) -> Result<(), &'static str> {
-    WINDOWS.lock().get_mut().bring_to_front(id)
+    let result = WINDOWS.lock().get_mut().bring_to_front(id);
+    if result.is_ok() { super::compositor::mark_dirty(); }
+    result
 }
 
 pub fn send_to_back(id: WindowId) -> Result<(), &'static str> {
-    WINDOWS.lock().get_mut().send_to_back(id)
+    let result = WINDOWS.lock().get_mut().send_to_back(id);
+    if result.is_ok() { super::compositor::mark_dirty(); }
+    result
 }
 
 pub fn close(id: WindowId) -> Result<(), &'static str> {
-    WINDOWS.lock().get_mut().close(id)
+    let result = WINDOWS.lock().get_mut().close(id);
+    if result.is_ok() { super::compositor::mark_dirty(); }
+    result
 }
 
 pub fn front() -> Option<WindowId> {
@@ -247,7 +254,9 @@ pub fn focused() -> Option<WindowId> {
 }
 
 pub fn focus(id: WindowId) -> Result<(), &'static str> {
-    WINDOWS.lock().get_mut().bring_to_front(id)
+    let result = WINDOWS.lock().get_mut().bring_to_front(id);
+    if result.is_ok() { super::compositor::mark_dirty(); }
+    result
 }
 
 pub fn hit_test(x: i32, y: i32) -> Option<WindowId> {
