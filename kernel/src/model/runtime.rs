@@ -253,6 +253,60 @@ pub fn object_frame(id: ObjectId) -> Option<u64> {
     if frame == 0 { None } else { Some(frame) }
 }
 
+pub fn validate_graphics_buffer_mapping(
+    cell: CellId,
+    buffer: ObjectId,
+) -> bool {
+    let graphics = match super::graphics::get_for_owner(buffer, cell) {
+        Some(value) => value,
+        None => return false,
+    };
+    let (frames, page_count) = match object_frames(buffer) {
+        Some(value) => value,
+        None => return false,
+    };
+    if page_count == 0 || graphics.address & (crate::memory::PAGE_SIZE - 1) != 0 {
+        return false;
+    }
+
+    let required = match graphics.required_bytes() {
+        Some(value) => value,
+        None => return false,
+    };
+    if required > graphics.size {
+        return false;
+    }
+    let pages_needed = match (required
+        .saturating_add(crate::memory::PAGE_SIZE - 1))
+        .checked_div(crate::memory::PAGE_SIZE)
+    {
+        Some(value) => value as usize,
+        None => return false,
+    };
+    if pages_needed == 0 || pages_needed > page_count {
+        return false;
+    }
+
+    let root = match cell_address_space_root(cell) {
+        Some(value) if value != 0 => value,
+        _ => return false,
+    };
+
+    for page in 0..pages_needed {
+        let address = match graphics.address.checked_add(
+            (page as u64) * crate::memory::PAGE_SIZE
+        ) {
+            Some(value) => value,
+            None => return false,
+        };
+        match crate::memory::paging::translate_user_address(root, address, false) {
+            Some(physical) if physical == frames[page] => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
 pub fn object_frames(id: ObjectId) -> Option<([u64; MAX_MEMORY_PAGES], usize)> {
     let guard = RUNTIME.lock();
     let state = guard.get();
