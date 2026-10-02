@@ -89,6 +89,18 @@ pub fn register(buffer: Buffer) -> Result<(), &'static str> {
         return Err("invalid graphics buffer");
     }
 
+    let (_, pages) = crate::model::runtime::object_frames(buffer.object)
+        .ok_or("graphics buffer backing object is not memory")?;
+    let backing_bytes = (pages as u64)
+        .checked_mul(crate::memory::PAGE_SIZE)
+        .ok_or("graphics buffer backing size overflow")?;
+    let end = buffer.address
+        .checked_add(buffer.size)
+        .ok_or("graphics buffer address overflow")?;
+    if buffer.size > backing_bytes || end < buffer.address {
+        return Err("graphics buffer exceeds backing object");
+    }
+
     let mut guard = BUFFERS.lock();
     for slot in guard.get_mut().iter_mut() {
         if slot.object == buffer.object {
