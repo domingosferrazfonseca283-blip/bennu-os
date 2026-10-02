@@ -30,6 +30,7 @@ struct RuntimeState {
     bennufs_probe_journal_end: u64,
     bennufs_probe_transaction: u64,
     bennufs_probe_highest: u64,
+    bennufs_probe_root_node: super::filesystem::Node,
 }
 
 impl RuntimeState {
@@ -53,6 +54,7 @@ impl RuntimeState {
         bennufs_probe_journal_end: 0,
         bennufs_probe_transaction: 0,
         bennufs_probe_highest: 0,
+        bennufs_probe_root_node: super::filesystem::Node::EMPTY,
     };
 }
 
@@ -359,6 +361,7 @@ pub fn complete_bennufs_probe(token: u64, completion_code: u8) {
         state.bennufs_probe_journal_end = 0;
         state.bennufs_probe_transaction = 0;
         state.bennufs_probe_highest = 0;
+        state.bennufs_probe_root_node = super::filesystem::Node::EMPTY;
     };
 
     if completion_code != 1 {
@@ -469,6 +472,57 @@ pub fn complete_bennufs_probe(token: u64, completion_code: u8) {
         return;
     }
 
+    if phase == 3 {
+        let superblock = {
+            let guard = RUNTIME.lock();
+            guard.get().bennufs_probe_superblock
+        };
+        let node = match super::filesystem::deserialize_node(&bytes) {
+            Some(value) => value,
+            None => {
+                clear_probe();
+                return;
+            }
+        };
+        if node.id != superblock.root_object
+            || !node.valid_extent(superblock.total_blocks)
+        {
+            clear_probe();
+            return;
+        }
+
+        let mut guard = RUNTIME.lock();
+        let state = guard.get_mut();
+        state.bennufs_probe_root_node = node;
+        let mut mounted_superblock = superblock;
+        mounted_superblock.sequence = state.bennufs_probe_highest;
+        for i in 0..MAX_BENNUFS_MOUNTS {
+            if !state.bennufs_mounts[i].mounted {
+                state.bennufs_mounts[i] = super::filesystem::BennuFsMount {
+                    device,
+                    superblock: mounted_superblock,
+                    mounted: true,
+                };
+                let target = state.cells[2].root;
+                let _ = emit_unlocked(
+                    state,
+                    Event::new(
+                        EventKind::ResourceChanged,
+                        device,
+                        target,
+                        mounted_superblock.sequence,
+                    ),
+                );
+                drop(guard);
+                clear_probe();
+                return;
+            }
+        }
+        drop(guard);
+        clear_probe();
+        return;
+    }
+
     if phase != 2 {
         clear_probe();
         return;
@@ -553,6 +607,29 @@ pub fn complete_bennufs_probe(token: u64, completion_code: u8) {
         state.bennufs_probe_highest = highest;
         return;
     }
+
+    let root_block = match super::filesystem::root_node_block(&superblock) {
+        Some(value) => value,
+        None => {
+            clear_probe();
+            return;
+        }
+    };
+    let next_token = BENNUFS_PROBE_TOKEN_BASE
+        .wrapping_add(device.0 as u64)
+        .wrapping_add(root_block);
+    if submit_bennufs_probe_read(device, buffer, CellId(2), root_block, next_token).is_err() {
+        clear_probe();
+        return;
+    }
+
+    let mut guard = RUNTIME.lock();
+    let state = guard.get_mut();
+    state.bennufs_probe_token = next_token;
+    state.bennufs_probe_phase = 3;
+    state.bennufs_probe_transaction = transaction;
+    state.bennufs_probe_highest = highest;
+    return;
 
     let mut mounted_superblock = superblock;
     mounted_superblock.sequence = highest;
