@@ -403,7 +403,7 @@ pub fn complete_bennufs_probe(token: u64, completion_code: u8) {
                     let target = state.cells[2].root;
                     let _ = emit_unlocked(
                         state,
-                        Event::new(EventKind::ResourceChanged, device, mount.sequence),
+                        Event::new(EventKind::ResourceChanged, device, state.cells[2].root, mount.sequence),
                     );
                     drop(guard);
                     clear_probe();
