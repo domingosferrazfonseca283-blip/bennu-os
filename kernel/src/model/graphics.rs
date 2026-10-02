@@ -47,17 +47,19 @@ impl Buffer {
             Some(value) => value,
             None => return None,
         };
-        if self.width == 0
-            || self.height == 0
-            || (self.stride as u64) < min_stride
-        {
+        if self.width == 0 || self.height == 0 || (self.stride as u64) < min_stride {
             return None;
         }
-        let row = match (self.stride as u64).checked_mul(self.height as u64) {
+
+        let last_row = match (self.height as u64 - 1).checked_mul(self.stride as u64) {
             Some(value) => value,
             None => return None,
         };
-        row.checked_add(bpp)
+        let last_pixel = match (self.width as u64).checked_mul(bpp) {
+            Some(value) => value,
+            None => return None,
+        };
+        last_row.checked_add(last_pixel)
     }
 
     pub const fn valid(&self) -> bool {
