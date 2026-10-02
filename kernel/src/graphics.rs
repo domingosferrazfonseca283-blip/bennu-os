@@ -1,4 +1,6 @@
 use super::boot_info::{BootInfo, BENNU_FRAMEBUFFER_BYTES_PER_PIXEL};
+use crate::model::compositor::CompositionCommand;
+use crate::model::graphics::PixelFormat;
 
 pub struct Framebuffer {
     base: *mut u32,
@@ -20,6 +22,8 @@ impl Framebuffer {
             || boot_info.framebuffer_height == 0
             || boot_info.framebuffer_pitch == 0
             || boot_info.framebuffer_bpp != 32
+            || boot_info.framebuffer_pitch % BENNU_FRAMEBUFFER_BYTES_PER_PIXEL != 0
+            || boot_info.framebuffer_addr & 3 != 0
         {
             return Err("no supported framebuffer");
         }
@@ -40,7 +44,6 @@ impl Framebuffer {
         {
             return Err("invalid framebuffer channel layout");
         }
-
         Ok(())
     }
 
@@ -89,6 +92,67 @@ impl Framebuffer {
             for xx in x..x2 {
                 core::ptr::write_volatile(row.add(xx), pixel);
             }
+        }
+    }
+
+    unsafe fn draw_command(&self, command: &CompositionCommand) -> Result<(), &'static str> {
+        let bpp = match command.format {
+            PixelFormat::Rgba8888 | PixelFormat::Bgra8888 => 4usize,
+            PixelFormat::Unknown => return Err("unsupported surface format"),
+        };
+        if command.buffer == 0 || command.stride < command.width.saturating_mul(bpp as u32) {
+            return Err("invalid composition buffer");
+        }
+
+        let source_end = (command.source_y as u64)
+            .checked_mul(command.stride as u64)
+            .and_then(|v| v.checked_add(command.source_x as u64 * bpp as u64))
+            .and_then(|v| v.checked_add((command.height.saturating_sub(1) as u64) * command.stride as u64))
+            .and_then(|v| v.checked_add(command.width as u64 * bpp as u64))
+            .ok_or("composition buffer overflow")?;
+
+        let src = command.buffer as *const u8;
+        for row in 0..command.height {
+            let source_offset = (command.source_y as u64 + row as u64)
+                .checked_mul(command.stride as u64)
+                .and_then(|v| v.checked_add(command.source_x as u64 * bpp as u64))
+                .ok_or("composition row overflow")? as usize;
+            let destination_y = command.destination_y as usize + row as usize;
+            if destination_y >= self.height { break; }
+            let width = core::cmp::min(command.width as usize, self.width.saturating_sub(command.destination_x as usize));
+            let source = src.add(source_offset);
+            let destination = self.base.add(destination_y * self.pitch_pixels + command.destination_x as usize);
+            for column in 0..width {
+                let value = core::ptr::read_unaligned(source.add(column * bpp) as *const u32);
+                let rgba = match command.format {
+                    PixelFormat::Rgba8888 => value,
+                    PixelFormat::Bgra8888 => {
+                        let r = value & 0x0000_00ff;
+                        let g = value & 0x0000_ff00;
+                        let b = value & 0x00ff_0000;
+                        let a = value & 0xff00_0000;
+                        (b << 16) | g | (r >> 16) | a
+                    }
+                    PixelFormat::Unknown => return Err("unsupported surface format"),
+                };
+                core::ptr::write_volatile(destination.add(column), rgba);
+            }
+        }
+
+        let _ = source_end;
+        Ok(())
+    }
+
+    pub unsafe fn render(&self, commands: &[CompositionCommand]) {
+        for command in commands {
+            if command.destination_x >= self.width as u32
+                || command.destination_y >= self.height as u32
+                || command.width == 0
+                || command.height == 0
+            {
+                continue;
+            }
+            let _ = self.draw_command(command);
         }
     }
 }
