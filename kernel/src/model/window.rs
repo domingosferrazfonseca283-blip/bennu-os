@@ -11,7 +11,7 @@ impl WindowId {
     pub const NULL: Self = Self(u16::MAX);
 
     pub const fn is_null(self) -> bool {
-        self == Self::NULL
+        self.0 == u16::MAX
     }
 }
 
