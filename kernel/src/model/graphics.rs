@@ -1,5 +1,5 @@
-use super::ObjectId;
 use super::sync::SpinLock;
+use super::{CellId, ObjectId};
 
 pub const MAX_BUFFERS: usize = 32;
 
@@ -15,6 +15,7 @@ pub enum PixelFormat {
 #[derive(Clone, Copy)]
 pub struct Buffer {
     pub object: ObjectId,
+    pub owner: CellId,
     pub address: u64,
     pub size: u64,
     pub stride: u32,
@@ -26,6 +27,7 @@ pub struct Buffer {
 impl Buffer {
     pub const EMPTY: Self = Self {
         object: ObjectId::NULL,
+        owner: CellId(0),
         address: 0,
         size: 0,
         stride: 0,
@@ -114,6 +116,15 @@ pub fn get(object: ObjectId) -> Option<Buffer> {
         }
     }
     None
+}
+
+pub fn get_for_owner(object: ObjectId, owner: CellId) -> Option<Buffer> {
+    let value = get(object)?;
+    if value.owner == owner {
+        Some(value)
+    } else {
+        None
+    }
 }
 
 #[repr(C)]
