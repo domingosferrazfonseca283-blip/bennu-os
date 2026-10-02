@@ -313,3 +313,88 @@ pub fn recover_journal(superblock: &Superblock, records: &[JournalRecord]) -> u6
     }
     highest
 }
+
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct BennuFsMount {
+    pub device: ObjectId,
+    pub superblock: Superblock,
+    pub mounted: bool,
+}
+
+impl BennuFsMount {
+    pub const EMPTY: Self = Self {
+        device: ObjectId::NULL,
+        superblock: Superblock::EMPTY,
+        mounted: false,
+    };
+
+    pub const fn from_geometry(
+        device: ObjectId,
+        block_size: u32,
+        total_blocks: u64,
+        root_object: ObjectId,
+    ) -> Option<Self> {
+        if device.is_null() || block_size != BENNUFS_BLOCK_SIZE {
+            return None;
+        }
+
+        let superblock = match Superblock::format(
+            total_blocks,
+            BENNUFS_DEFAULT_JOURNAL_BLOCKS,
+            root_object,
+        ) {
+            Some(value) => value,
+            None => return None,
+        };
+
+        Some(Self {
+            device,
+            superblock,
+            mounted: true,
+        })
+    }
+
+    pub const fn validate_block(
+        &self,
+        block: u64,
+    ) -> bool {
+        self.mounted
+            && self.superblock.valid()
+            && block < self.superblock.total_blocks
+    }
+
+    pub const fn data_range(&self) -> Option<(u64, u64)> {
+        if !self.mounted || !self.superblock.valid() {
+            return None;
+        }
+        Some((
+            self.superblock.metadata_blocks,
+            self.superblock.total_blocks,
+        ))
+    }
+
+    pub const fn journal_range(&self) -> Option<(u64, u64)> {
+        if !self.mounted || !self.superblock.valid() {
+            return None;
+        }
+        let end = match self.superblock.journal_start.checked_add(
+            self.superblock.journal_blocks,
+        ) {
+            Some(value) => value,
+            None => return None,
+        };
+        Some((self.superblock.journal_start, end))
+    }
+}
+
+/// Validate a physical block-device geometry before BennuFS is mounted.
+pub const fn validate_block_geometry(
+    block_size: u32,
+    block_count: u64,
+) -> bool {
+    block_size == BENNUFS_BLOCK_SIZE
+        && block_count >= 8
+        && block_count <= (u64::MAX / BENNUFS_BLOCK_SIZE as u64)
+}
