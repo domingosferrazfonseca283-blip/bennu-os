@@ -103,6 +103,19 @@ pub fn attach(
     Err("surface table full")
 }
 
+pub fn find_by_object(object: ObjectId) -> Option<Surface> {
+    if object.is_null() {
+        return None;
+    }
+    let guard = SURFACES.lock();
+    for value in guard.get().iter() {
+        if value.object == object && value.valid() {
+            return Some(*value);
+        }
+    }
+    None
+}
+
 pub fn get(index: usize) -> Option<Surface> {
     if index >= MAX_SURFACES {
         return None;
