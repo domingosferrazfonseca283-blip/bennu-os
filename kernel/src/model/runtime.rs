@@ -24,6 +24,12 @@ struct RuntimeState {
     bennufs_probe_device: ObjectId,
     bennufs_probe_token: u64,
     bennufs_probe_buffer: ObjectId,
+    bennufs_probe_phase: u8,
+    bennufs_probe_superblock: super::filesystem::Superblock,
+    bennufs_probe_next_block: u64,
+    bennufs_probe_journal_end: u64,
+    bennufs_probe_transaction: u64,
+    bennufs_probe_highest: u64,
 }
 
 impl RuntimeState {
@@ -41,6 +47,12 @@ impl RuntimeState {
         bennufs_probe_device: ObjectId::NULL,
         bennufs_probe_token: 0,
         bennufs_probe_buffer: ObjectId::NULL,
+        bennufs_probe_phase: 0,
+        bennufs_probe_superblock: super::filesystem::Superblock::EMPTY,
+        bennufs_probe_next_block: 0,
+        bennufs_probe_journal_end: 0,
+        bennufs_probe_transaction: 0,
+        bennufs_probe_highest: 0,
     };
 }
 
@@ -295,94 +307,251 @@ pub fn prepare_bennufs_mount(device: ObjectId) -> Result<(), &'static str> {
 }
 
 pub fn complete_bennufs_probe(token: u64, completion_code: u8) {
-    let (device, buffer) = {
+    let (device, buffer, phase) = {
         let guard = RUNTIME.lock();
         let state = guard.get();
-        if state.bennufs_probe_token != token
-            || state.bennufs_probe_device.is_null()
-        {
+        if state.bennufs_probe_token != token || state.bennufs_probe_device.is_null() {
             return;
         }
-        (state.bennufs_probe_device, state.bennufs_probe_buffer)
+        (state.bennufs_probe_device, state.bennufs_probe_buffer, state.bennufs_probe_phase)
     };
 
-    if completion_code != 1 {
+    let clear_probe = || {
         let mut guard = RUNTIME.lock();
         let state = guard.get_mut();
         state.bennufs_probe_device = ObjectId::NULL;
         state.bennufs_probe_token = 0;
         state.bennufs_probe_buffer = ObjectId::NULL;
+        state.bennufs_probe_phase = 0;
+        state.bennufs_probe_superblock = super::filesystem::Superblock::EMPTY;
+        state.bennufs_probe_next_block = 0;
+        state.bennufs_probe_journal_end = 0;
+        state.bennufs_probe_transaction = 0;
+        state.bennufs_probe_highest = 0;
+    };
+
+    if completion_code != 1 {
+        clear_probe();
         return;
     }
 
     let mut bytes = [0u8; super::filesystem::BENNUFS_BLOCK_SIZE as usize];
     let root = match cell_address_space_root(CellId(2)) {
         Some(value) if value != 0 => value,
-        _ => return,
+        _ => {
+            clear_probe();
+            return;
+        }
     };
-    if crate::memory::user::copy_from_user(root, bytes.as_mut_ptr(), BENNUFS_PROBE_ADDRESS, bytes.len() as u64).is_err() {
+    if crate::memory::user::copy_from_user(
+        root,
+        bytes.as_mut_ptr(),
+        BENNUFS_PROBE_ADDRESS,
+        bytes.len() as u64,
+    ).is_err() {
+        clear_probe();
         return;
     }
 
-    let superblock = match super::filesystem::deserialize_superblock(&bytes) {
-        Some(value) => value,
-        None => {
+    if phase == 1 {
+        let superblock = match super::filesystem::deserialize_superblock(&bytes) {
+            Some(value) => value,
+            None => {
+                clear_probe();
+                return;
+            }
+        };
+
+        let geometry_ok = {
+            let guard = RUNTIME.lock();
+            let state = guard.get();
+            let mut geometry = None;
+            for i in 0..super::storage::MAX_BLOCK_DEVICES {
+                if state.block_devices[i].object == device {
+                    geometry = Some(state.block_devices[i].geometry);
+                    break;
+                }
+            }
+            geometry.map(|g| {
+                g.block_size == super::filesystem::BENNUFS_BLOCK_SIZE
+                    && g.block_count == superblock.total_blocks
+            }).unwrap_or(false)
+        };
+        if !geometry_ok {
+            clear_probe();
+            return;
+        }
+
+        let journal_end = match superblock.journal_start.checked_add(superblock.journal_blocks) {
+            Some(value) if value <= superblock.total_blocks => value,
+            _ => {
+                clear_probe();
+                return;
+            }
+        };
+
+        if superblock.journal_blocks == 0 {
+            let mut mount = superblock;
+            mount.sequence = superblock.sequence;
             let mut guard = RUNTIME.lock();
             let state = guard.get_mut();
-            state.bennufs_probe_device = ObjectId::NULL;
-            state.bennufs_probe_token = 0;
-            state.bennufs_probe_buffer = ObjectId::NULL;
+            for i in 0..MAX_BENNUFS_MOUNTS {
+                if !state.bennufs_mounts[i].mounted {
+                    state.bennufs_mounts[i] = super::filesystem::BennuFsMount {
+                        device, superblock: mount, mounted: true
+                    };
+                    let target = state.cells[2].root;
+                    let _ = emit_unlocked(
+                        state,
+                        Event::new(EventKind::ResourceChanged, device, mount.sequence),
+                    );
+                    drop(guard);
+                    clear_probe();
+                    return;
+                }
+            }
+            drop(guard);
+            clear_probe();
+            return;
+        }
+
+        let next_block = superblock.journal_start;
+        let next_token = BENNUFS_PROBE_TOKEN_BASE
+            .wrapping_add(device.0 as u64)
+            .wrapping_add(next_block);
+        if submit_bennufs_probe_read(
+            device, buffer, CellId(2), next_block, next_token
+        ).is_err() {
+            clear_probe();
+            return;
+        }
+
+        let mut guard = RUNTIME.lock();
+        let state = guard.get_mut();
+        state.bennufs_probe_token = next_token;
+        state.bennufs_probe_phase = 2;
+        state.bennufs_probe_superblock = superblock;
+        state.bennufs_probe_next_block = next_block;
+        state.bennufs_probe_journal_end = journal_end;
+        state.bennufs_probe_transaction = 0;
+        state.bennufs_probe_highest = superblock.sequence;
+        return;
+    }
+
+    if phase != 2 {
+        clear_probe();
+        return;
+    }
+
+    let (superblock, block, journal_end, mut transaction, mut highest) = {
+        let guard = RUNTIME.lock();
+        let state = guard.get();
+        (
+            state.bennufs_probe_superblock,
+            state.bennufs_probe_next_block,
+            state.bennufs_probe_journal_end,
+            state.bennufs_probe_transaction,
+            state.bennufs_probe_highest,
+        )
+    };
+
+    let record_size = core::mem::size_of::<super::filesystem::JournalRecord>();
+    if record_size == 0 || record_size > bytes.len() {
+        clear_probe();
+        return;
+    }
+
+    let records = bytes.len() / record_size;
+    for index in 0..records {
+        let offset = index * record_size;
+        let record = unsafe {
+            core::ptr::read_unaligned(
+                bytes.as_ptr().add(offset)
+                    as *const super::filesystem::JournalRecord
+            )
+        };
+        if !record.valid_for(&superblock) || record.sequence < superblock.sequence {
+            continue;
+        }
+
+        match record.operation {
+            super::filesystem::JournalOp::Begin => {
+                transaction = record.sequence;
+            }
+            super::filesystem::JournalOp::Commit
+                if transaction == record.sequence =>
+            {
+                if record.sequence > highest {
+                    highest = record.sequence;
+                }
+                transaction = 0;
+            }
+            super::filesystem::JournalOp::Checkpoint => {
+                if record.sequence > highest {
+                    highest = record.sequence;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let next_block = match block.checked_add(1) {
+        Some(value) => value,
+        None => {
+            clear_probe();
             return;
         }
     };
 
-    let geometry_ok = {
-        let guard = RUNTIME.lock();
-        let state = guard.get();
-        let mut geometry = None;
-        for i in 0..super::storage::MAX_BLOCK_DEVICES {
-            if state.block_devices[i].object == device {
-                geometry = Some(state.block_devices[i].geometry);
-                break;
-            }
+    if next_block < journal_end {
+        let next_token = BENNUFS_PROBE_TOKEN_BASE
+            .wrapping_add(device.0 as u64)
+            .wrapping_add(next_block);
+        if submit_bennufs_probe_read(
+            device, buffer, CellId(2), next_block, next_token
+        ).is_err() {
+            clear_probe();
+            return;
         }
-        geometry.map(|g| g.block_size == super::filesystem::BENNUFS_BLOCK_SIZE
-            && g.block_count == superblock.total_blocks).unwrap_or(false)
-    };
-    if !geometry_ok {
+
         let mut guard = RUNTIME.lock();
         let state = guard.get_mut();
-        state.bennufs_probe_device = ObjectId::NULL;
-        state.bennufs_probe_token = 0;
-        state.bennufs_probe_buffer = ObjectId::NULL;
+        state.bennufs_probe_token = next_token;
+        state.bennufs_probe_next_block = next_block;
+        state.bennufs_probe_transaction = transaction;
+        state.bennufs_probe_highest = highest;
         return;
     }
 
-    let mount = super::filesystem::BennuFsMount {
-        device,
-        superblock,
-        mounted: true,
-    };
+    let mut mounted_superblock = superblock;
+    mounted_superblock.sequence = highest;
 
     let mut guard = RUNTIME.lock();
     let state = guard.get_mut();
     for i in 0..MAX_BENNUFS_MOUNTS {
         if !state.bennufs_mounts[i].mounted {
-            state.bennufs_mounts[i] = mount;
-            state.bennufs_probe_device = ObjectId::NULL;
-            state.bennufs_probe_token = 0;
-            state.bennufs_probe_buffer = ObjectId::NULL;
+            state.bennufs_mounts[i] = super::filesystem::BennuFsMount {
+                device,
+                superblock: mounted_superblock,
+                mounted: true,
+            };
             let target = state.cells[2].root;
             let _ = emit_unlocked(
                 state,
-                Event::new(EventKind::ResourceChanged, device, target, superblock.sequence),
+                Event::new(
+                    EventKind::ResourceChanged,
+                    device,
+                    target,
+                    mounted_superblock.sequence,
+                ),
             );
+            drop(guard);
+            clear_probe();
             return;
         }
     }
-    state.bennufs_probe_device = ObjectId::NULL;
-    state.bennufs_probe_token = 0;
-    state.bennufs_probe_buffer = ObjectId::NULL;
+    drop(guard);
+    clear_probe();
 }
 
 pub fn bennufs_mount(device: ObjectId) -> Option<super::filesystem::BennuFsMount> {
