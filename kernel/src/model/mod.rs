@@ -37,7 +37,7 @@ pub use surface::Surface;
 pub use window::{Window,WindowId};
 pub use address_space::{AddressSpace,AddressSpaceId,Mapping,MappingKind};
 pub use storage::{BlockDevice,BlockGeometry,BlockKind,BlockOp,BlockRequest};
-pub use usb::{HostControllerKind,TransferKind,UsbAddress,UsbDeviceDescriptor,UsbDeviceState,UsbEndpoint,UsbDeviceTopology,UsbMassStorageBotCbw,UsbMassStorageBotCsw,ScsiCommand,UsbMassStorageTransport,UsbMassStorageStage};
+pub use usb::{HostControllerKind,TransferKind,UsbAddress,UsbDeviceDescriptor,UsbDeviceState,UsbEndpoint,UsbConfiguration,UsbDevice,UsbInterface,UsbEndpointDescriptor,UsbDeviceTopology,UsbMassStorageBotCbw,UsbMassStorageBotCsw,ScsiCommand,UsbMassStorageTransport,UsbMassStorageStage};
 pub use device::{DeviceClass,DeviceDescriptor};
 pub use driver::{DriverBinding,DriverState};
 pub use io::{DeviceRequest,IoCompletion,IoEnvelope,IoState,IoStatus};
