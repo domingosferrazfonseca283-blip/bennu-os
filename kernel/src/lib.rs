@@ -46,20 +46,46 @@ fn init_graphics_surface(boot_info: &boot_info::BootInfo) {
                 } else {
                     0xff203048
                 };
-                core::ptr::write_volatile(pixels.add((y * width + x) as usize), value);
+                core::ptr::write_volatile(
+                    pixels.add((y * width + x) as usize),
+                    value,
+                );
             }
         }
+    }
+
+    if model::graphics::register(model::Buffer {
+        object: memory,
+        address: mapped,
+        size: memory::PAGE_SIZE,
+        stride,
+        width,
+        height,
+        format: model::PixelFormat::Rgba8888,
+    })
+    .is_err()
+    {
+        return;
     }
 
     let surface = match model::runtime::create_object(model::ObjectKind::Surface, 0) {
         Ok(object) => object,
         Err(_) => return,
     };
-    if model::surface::attach(surface, width, height, mapped).is_err() {
+    if model::surface::attach(surface, width, height, memory).is_err() {
         return;
     }
 
-    if model::window::create(model::ObjectId::new(1, 1), surface, 40, 190, width, height).is_err() {
+    if model::window::create(
+        model::ObjectId::new(1, 1),
+        surface,
+        40,
+        190,
+        width,
+        height,
+    )
+    .is_err()
+    {
         return;
     }
 
@@ -73,7 +99,7 @@ fn init_graphics_surface(boot_info: &boot_info::BootInfo) {
         width: 0,
         height: 0,
         buffer: 0,
-        stride: stride,
+        stride,
         format: model::PixelFormat::Rgba8888,
     }; model::compositor::MAX_VISIBLE_RECTS];
     let count = model::compositor::build_visible_commands(
@@ -89,6 +115,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     drivers::keyboard::init();
     drivers::console::init();
     model::runtime::init();
+    model::graphics::init();
     model::surface::init();
     model::window::init();
     model::init_io_fabric(model::policy::AccessPolicy::USB_FIRST);
@@ -159,7 +186,12 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         arch::diagnostics::write_line(1, b"BENNU USER: CELL CREATE FAILED");
         return;
     }
-    if model::runtime::prepare_cell_context(model::CellId(2), model::scheduler::cell_trampoline as usize as u64).is_err() {
+    if model::runtime::prepare_cell_context(
+        model::CellId(2),
+        model::scheduler::cell_trampoline as usize as u64,
+    )
+    .is_err()
+    {
         arch::diagnostics::write_line(1, b"BENNU USER: CELL CONTEXT FAILED");
         return;
     }
@@ -174,8 +206,17 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     arch::diagnostics::write_line(6, b"BENNU USER: RING3 CELL ONLINE");
 
     if let Ok(memory_object) = model::runtime::create_object(model::ObjectKind::Memory, 2) {
-        let _ = model::runtime::grant(model::CellId(2), memory_object, model::CapabilityRights::READ.union(model::CapabilityRights::WRITE).union(model::CapabilityRights::MAP));
-        arch::diagnostics::write_line(6, b"BENNU USER: MEMORY OBJECT + MAP CAPABILITY ONLINE");
+        let _ = model::runtime::grant(
+            model::CellId(2),
+            memory_object,
+            model::CapabilityRights::READ
+                .union(model::CapabilityRights::WRITE)
+                .union(model::CapabilityRights::MAP),
+        );
+        arch::diagnostics::write_line(
+            6,
+            b"BENNU USER: MEMORY OBJECT + MAP CAPABILITY ONLINE",
+        );
     }
 
     if model::runtime::bind_entry(model::CellId(1), bootstrap_cell).is_err() {
@@ -183,7 +224,12 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         return;
     }
 
-    if model::runtime::prepare_cell_context(model::CellId(1), model::scheduler::cell_trampoline as usize as u64).is_err() {
+    if model::runtime::prepare_cell_context(
+        model::CellId(1),
+        model::scheduler::cell_trampoline as usize as u64,
+    )
+    .is_err()
+    {
         arch::diagnostics::write_line(1, b"BENNU EXEC: CELL STACK PREP FAILED");
         return;
     }
@@ -195,29 +241,67 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
             match memory::paging::map_mmio(mmio, 64 * 1024) {
                 Ok(mapped) => {
                     let cap = unsafe { model::xhci::probe_mmio(mapped) };
-                    if model::runtime::register_device_fabric_pci(pci, model::DeviceClass::UsbController).is_ok() {
+                    if model::runtime::register_device_fabric_pci(
+                        pci,
+                        model::DeviceClass::UsbController,
+                    )
+                    .is_ok()
+                    {
                         let mut controller = model::XhciController::EMPTY;
                         controller.object = pci.object;
                         if controller.configure(cap, mapped).is_ok() {
                             let reset = unsafe { model::xhci::reset_controller(mapped, cap) };
-                            let dma = if reset.is_ok() { unsafe { model::xhci::setup_dma(&mut controller) } } else { Err("reset failed") };
-                            let start = if dma.is_ok() { unsafe { model::xhci::start_controller(&mut controller, cap) } } else { Err("DMA setup failed") };
-                            if start.is_ok() && model::runtime::register_xhci_controller(controller).is_ok() {
-                                arch::diagnostics::write_line(6, b"BENNU USB: xHCI DMA + RINGS ONLINE");
-                                match model::runtime::start_usb_enumeration(1) {
-                                    Ok(count) => {
-                                        if count != 0 { arch::diagnostics::write_line(6, b"BENNU USB: ENUMERATION QUEUED"); }
-                                        else { arch::diagnostics::write_line(6, b"BENNU USB: NO DEVICE ON ROOT PORTS"); }
-                                    }
-                                    Err(_) => arch::diagnostics::write_line(5, b"BENNU USB: ENUMERATION START FAILED"),
+                            let dma = if reset.is_ok() {
+                                unsafe { model::xhci::setup_dma(&mut controller) }
+                            } else {
+                                Err("reset failed")
+                            };
+                            let start = if dma.is_ok() {
+                                unsafe {
+                                    model::xhci::start_controller(&mut controller, cap)
                                 }
                             } else {
-                                arch::diagnostics::write_line(5, b"BENNU USB: xHCI DMA/START FAILED");
+                                Err("DMA setup failed")
+                            };
+                            if start.is_ok()
+                                && model::runtime::register_xhci_controller(controller).is_ok()
+                            {
+                                arch::diagnostics::write_line(
+                                    6,
+                                    b"BENNU USB: xHCI DMA + RINGS ONLINE",
+                                );
+                                match model::runtime::start_usb_enumeration(1) {
+                                    Ok(count) => {
+                                        if count != 0 {
+                                            arch::diagnostics::write_line(
+                                                6,
+                                                b"BENNU USB: ENUMERATION QUEUED",
+                                            );
+                                        } else {
+                                            arch::diagnostics::write_line(
+                                                6,
+                                                b"BENNU USB: NO DEVICE ON ROOT PORTS",
+                                            );
+                                        }
+                                    }
+                                    Err(_) => arch::diagnostics::write_line(
+                                        5,
+                                        b"BENNU USB: ENUMERATION START FAILED",
+                                    ),
+                                }
+                            } else {
+                                arch::diagnostics::write_line(
+                                    5,
+                                    b"BENNU USB: xHCI DMA/START FAILED",
+                                );
                             }
                         }
                     }
                 }
-                Err(_) => arch::diagnostics::write_line(5, b"BENNU USB: xHCI MMIO MAP FAILED"),
+                Err(_) => arch::diagnostics::write_line(
+                    5,
+                    b"BENNU USB: xHCI MMIO MAP FAILED",
+                ),
             }
         }
     } else {
