@@ -631,35 +631,6 @@ pub fn complete_bennufs_probe(token: u64, completion_code: u8) {
     state.bennufs_probe_highest = highest;
     return;
 
-    let mut mounted_superblock = superblock;
-    mounted_superblock.sequence = highest;
-
-    let mut guard = RUNTIME.lock();
-    let state = guard.get_mut();
-    for i in 0..MAX_BENNUFS_MOUNTS {
-        if !state.bennufs_mounts[i].mounted {
-            state.bennufs_mounts[i] = super::filesystem::BennuFsMount {
-                device,
-                superblock: mounted_superblock,
-                mounted: true,
-            };
-            let target = state.cells[2].root;
-            let _ = emit_unlocked(
-                state,
-                Event::new(
-                    EventKind::ResourceChanged,
-                    device,
-                    target,
-                    mounted_superblock.sequence,
-                ),
-            );
-            drop(guard);
-            clear_probe();
-            return;
-        }
-    }
-    drop(guard);
-    clear_probe();
 }
 
 pub fn bennufs_mount(device: ObjectId) -> Option<super::filesystem::BennuFsMount> {
