@@ -22,6 +22,8 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     drivers::keyboard::init();
     drivers::console::init();
     model::runtime::init();
+    model::surface::init();
+    model::window::init();
     model::init_io_fabric(model::policy::AccessPolicy::USB_FIRST);
 
     let root = match model::runtime::create_object(model::ObjectKind::Cell, 0) {
