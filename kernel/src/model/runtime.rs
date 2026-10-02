@@ -178,7 +178,6 @@ pub fn service_device_events() {
     }
 }
 
-
 pub fn init() {
     *RUNTIME.lock().get_mut() = RuntimeState::EMPTY;
     super::graph::init();
@@ -224,6 +223,17 @@ pub fn create_object(kind: ObjectKind, owner: u32) -> Result<ObjectId, &'static 
         return Ok(id);
     }
     Err("object space exhausted")
+}
+
+pub fn object_frame(id: ObjectId) -> Option<u64> {
+    let guard = RUNTIME.lock();
+    let state = guard.get();
+    if !object_exists_unlocked(state, id) {
+        return None;
+    }
+    let index = id.index();
+    let frame = state.memory_frames[index];
+    if frame == 0 { None } else { Some(frame) }
 }
 
 pub fn create_cell(id: CellId, root: ObjectId) -> Result<(), &'static str> {
