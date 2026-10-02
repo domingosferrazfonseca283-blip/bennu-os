@@ -196,6 +196,31 @@ pub const fn blocks_for_bytes(bytes: u64) -> Option<u64> {
     Some(adjusted / BENNUFS_BLOCK_SIZE as u64)
 }
 
+pub const fn root_node_block(superblock: &Superblock) -> Option<u64> {
+    if !superblock.valid() || superblock.root_object.is_null() {
+        return None;
+    }
+    if superblock.metadata_blocks >= superblock.total_blocks {
+        return None;
+    }
+    Some(superblock.metadata_blocks)
+}
+
+pub fn deserialize_node(bytes: &[u8]) -> Option<Node> {
+    if bytes.len() < core::mem::size_of::<Node>() {
+        return None;
+    }
+    let mut node = Node::EMPTY;
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            bytes.as_ptr(),
+            &mut node as *mut Node as *mut u8,
+            core::mem::size_of::<Node>(),
+        );
+    }
+    Some(node)
+}
+
 pub const fn data_block_start(superblock: &Superblock) -> Option<u64> {
     if !superblock.valid() { return None; }
     Some(superblock.metadata_blocks)
