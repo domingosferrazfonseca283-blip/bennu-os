@@ -1,4 +1,7 @@
 use super::ObjectId;
+use super::sync::SpinLock;
+
+pub const MAX_BUFFERS: usize = 32;
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -50,7 +53,6 @@ impl Buffer {
         if self.width == 0 || self.height == 0 || (self.stride as u64) < min_stride {
             return None;
         }
-
         let last_row = match (self.height as u64 - 1).checked_mul(self.stride as u64) {
             Some(value) => value,
             None => return None,
@@ -66,12 +68,52 @@ impl Buffer {
         if self.object.is_null() || self.address == 0 || self.width == 0 || self.height == 0 {
             return false;
         }
-        let bytes = match self.required_bytes() {
-            Some(value) => value,
-            None => return false,
-        };
-        bytes <= self.size
+        match self.required_bytes() {
+            Some(bytes) => bytes <= self.size,
+            None => false,
+        }
     }
+}
+
+static BUFFERS: SpinLock<[Buffer; MAX_BUFFERS]> =
+    SpinLock::new([Buffer::EMPTY; MAX_BUFFERS]);
+
+pub fn init() {
+    *BUFFERS.lock().get_mut() = [Buffer::EMPTY; MAX_BUFFERS];
+}
+
+pub fn register(buffer: Buffer) -> Result<(), &'static str> {
+    if !buffer.valid() {
+        return Err("invalid graphics buffer");
+    }
+
+    let mut guard = BUFFERS.lock();
+    for slot in guard.get_mut().iter_mut() {
+        if slot.object == buffer.object {
+            *slot = buffer;
+            return Ok(());
+        }
+    }
+    for slot in guard.get_mut().iter_mut() {
+        if slot.object.is_null() {
+            *slot = buffer;
+            return Ok(());
+        }
+    }
+    Err("graphics buffer table full")
+}
+
+pub fn get(object: ObjectId) -> Option<Buffer> {
+    if object.is_null() {
+        return None;
+    }
+    let guard = BUFFERS.lock();
+    for slot in guard.get().iter() {
+        if slot.object == object && slot.valid() {
+            return Some(*slot);
+        }
+    }
+    None
 }
 
 #[repr(C)]
