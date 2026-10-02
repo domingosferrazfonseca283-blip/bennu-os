@@ -1,6 +1,7 @@
 use super::{surface, window, WindowId};
 
 pub const MAX_COMPOSITION_WINDOWS: usize = window::MAX_WINDOWS;
+pub const MAX_VISIBLE_RECTS: usize = MAX_COMPOSITION_WINDOWS * 4 + 4;
 
 #[derive(Clone, Copy)]
 pub struct CompositionEntry {
@@ -21,6 +22,29 @@ pub struct CompositionCommand {
     pub width: u32,
     pub height: u32,
     pub buffer: u64,
+}
+
+#[derive(Clone, Copy)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+impl Rect {
+    const EMPTY: Self = Self { left: 0, top: 0, right: 0, bottom: 0 };
+
+    const fn valid(&self) -> bool {
+        self.right > self.left && self.bottom > self.top
+    }
+
+    const fn intersects(&self, other: &Self) -> bool {
+        self.left < other.right
+            && self.right > other.left
+            && self.top < other.bottom
+            && self.bottom > other.top
+    }
 }
 
 pub fn collect(out: &mut [CompositionEntry]) -> usize {
@@ -106,6 +130,141 @@ pub fn build_commands(
     }
 
     written
+}
+
+pub fn build_visible_commands(
+    screen_width: u32,
+    screen_height: u32,
+    out: &mut [CompositionCommand],
+) -> usize {
+    let mut entries = [CompositionEntry {
+        window: WindowId::NULL,
+        surface: surface::Surface::EMPTY,
+        x: 0,
+        y: 0,
+    }; MAX_COMPOSITION_WINDOWS];
+
+    let count = collect(&mut entries);
+    let mut written = 0;
+    let mut index = count;
+
+    while index > 0 {
+        index -= 1;
+        let entry = entries[index];
+        if entry.surface.width == 0
+            || entry.surface.height == 0
+            || entry.surface.buffer == 0
+        {
+            continue;
+        }
+
+        let base = Rect {
+            left: core::cmp::max(entry.x, 0),
+            top: core::cmp::max(entry.y, 0),
+            right: core::cmp::min(
+                screen_width as i32,
+                entry.x.saturating_add(entry.surface.width as i32),
+            ),
+            bottom: core::cmp::min(
+                screen_height as i32,
+                entry.y.saturating_add(entry.surface.height as i32),
+            ),
+        };
+        if !base.valid() {
+            continue;
+        }
+
+        let mut visible = [Rect::EMPTY; MAX_VISIBLE_RECTS];
+        visible[0] = base;
+        let mut visible_count = 1;
+
+        let mut front = index + 1;
+        while front < count && visible_count != 0 {
+            let above = entries[front];
+            let cover = Rect {
+                left: core::cmp::max(above.x, 0),
+                top: core::cmp::max(above.y, 0),
+                right: core::cmp::min(
+                    screen_width as i32,
+                    above.x.saturating_add(above.surface.width as i32),
+                ),
+                bottom: core::cmp::min(
+                    screen_height as i32,
+                    above.y.saturating_add(above.surface.height as i32),
+                ),
+            };
+
+            if cover.valid() {
+                visible_count = subtract_rects(&mut visible, visible_count, &cover);
+            }
+            front += 1;
+        }
+
+        let mut piece = 0;
+        while piece < visible_count && written < out.len() {
+            let rect = visible[piece];
+            out[written] = command_for_rect(entry, rect);
+            written += 1;
+            piece += 1;
+        }
+    }
+
+    written
+}
+
+fn subtract_rects(rects: &mut [Rect], count: usize, cover: &Rect) -> usize {
+    let mut index = 0;
+    let mut current_count = count;
+
+    while index < current_count {
+        let rect = rects[index];
+        if !rect.intersects(cover) {
+            index += 1;
+            continue;
+        }
+
+        let left = rect.left;
+        let right = rect.right;
+        let top = rect.top;
+        let bottom = rect.bottom;
+
+        current_count -= 1;
+        rects[index] = rects[current_count];
+
+        let pieces = [
+            Rect { left, top, right, bottom: core::cmp::min(bottom, cover.top) },
+            Rect { left, top: core::cmp::max(top, cover.bottom), right, bottom },
+            Rect { left, top: core::cmp::max(top, cover.top), right: core::cmp::min(right, cover.left), bottom: core::cmp::min(bottom, cover.bottom) },
+            Rect { left: core::cmp::max(left, cover.right), top: core::cmp::max(top, cover.top), right, bottom: core::cmp::min(bottom, cover.bottom) },
+        ];
+
+        let mut p = 0;
+        while p < pieces.len() {
+            if pieces[p].valid() && current_count < rects.len() {
+                rects[current_count] = pieces[p];
+                current_count += 1;
+            }
+            p += 1;
+        }
+    }
+
+    current_count
+}
+
+fn command_for_rect(entry: CompositionEntry, rect: Rect) -> CompositionCommand {
+    let source_x = (rect.left - entry.x) as u32;
+    let source_y = (rect.top - entry.y) as u32;
+    CompositionCommand {
+        window: entry.window,
+        surface: entry.surface.object,
+        source_x,
+        source_y,
+        destination_x: rect.left as u32,
+        destination_y: rect.top as u32,
+        width: (rect.right - rect.left) as u32,
+        height: (rect.bottom - rect.top) as u32,
+        buffer: entry.surface.buffer,
+    }
 }
 
 fn find_surface(object: super::object::ObjectId) -> Option<surface::Surface> {
