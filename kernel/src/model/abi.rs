@@ -16,6 +16,7 @@ pub enum Operation {
     SurfaceCreate = 7,
     DeviceSubmit = 8,
     Yield = 9,
+    Present = 10,
 }
 
 #[repr(C)]
@@ -67,6 +68,7 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
 
     match call.operation {
         Operation::Yield => ResultCode::error(ABI_STATUS_YIELD),
+        Operation::Present => ResultCode::error(ABI_STATUS_INVALID),
         Operation::None => ResultCode::error(ABI_STATUS_INVALID),
 
         Operation::ObjectQuery => {
@@ -166,5 +168,17 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
                 Err(_) => ResultCode::error(ABI_STATUS_INVALID),
             }
         }
+    }
+}
+
+
+pub fn dispatch_present(
+    cell: super::CellId,
+    capability: CapabilityId,
+    present: &super::graphics::Present,
+) -> ResultCode {
+    match super::runtime::present_surface(cell, capability, present) {
+        Ok(()) => ResultCode::OK,
+        Err(_) => ResultCode::error(ABI_STATUS_DENIED),
     }
 }
