@@ -11,7 +11,7 @@ impl Framebuffer {
     fn validate(b:&BootInfo)->Result<(),&'static str>{
         if b.framebuffer_addr==0||b.framebuffer_width==0||b.framebuffer_height==0||b.framebuffer_pitch==0||b.framebuffer_bpp!=32||b.framebuffer_pitch%BENNU_FRAMEBUFFER_BYTES_PER_PIXEL!=0||b.framebuffer_addr&3!=0{return Err("no supported framebuffer");}
         let min=(b.framebuffer_width as u64).checked_mul(BENNU_FRAMEBUFFER_BYTES_PER_PIXEL as u64).ok_or("framebuffer pitch overflow")?;
-        if b.framebuffer_pitch as u64<min{return Err("framebuffer pitch is too small");}
+        if (b.framebuffer_pitch as u64)<min{return Err("framebuffer pitch is too small");}
         if b.framebuffer_red_position>=32||b.framebuffer_green_position>=32||b.framebuffer_blue_position>=32||(b.framebuffer_red_position as u16+b.framebuffer_red_mask as u16)>32||(b.framebuffer_green_position as u16+b.framebuffer_green_mask as u16)>32||(b.framebuffer_blue_position as u16+b.framebuffer_blue_mask as u16)>32{return Err("invalid framebuffer channel layout");} Ok(())
     }
     pub unsafe fn from_boot_info(b:&BootInfo)->Result<Self,&'static str>{Self::validate(b)?;let bytes=(b.framebuffer_pitch as u64).checked_mul(b.framebuffer_height as u64).ok_or("framebuffer size overflow")?;let base=crate::memory::paging::map_mmio(b.framebuffer_addr,bytes)? as *mut u32;Ok(Self{base,width:b.framebuffer_width as usize,height:b.framebuffer_height as usize,pitch_pixels:b.framebuffer_pitch as usize/4,red_mask:b.framebuffer_red_mask,red_shift:b.framebuffer_red_position,green_mask:b.framebuffer_green_mask,green_shift:b.framebuffer_green_position,blue_mask:b.framebuffer_blue_mask,blue_shift:b.framebuffer_blue_position})}
