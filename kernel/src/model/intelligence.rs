@@ -7,7 +7,6 @@ pub const MAX_COGNITIVE_PLAN_STEPS: usize = 8;
 pub const MAX_COGNITIVE_STEP_DEPS: usize = 4;
 pub const MAX_COGNITIVE_MODELS: usize = 4;
 pub const MAX_COGNITIVE_RULES: usize = 32;
-
 pub const MAX_COGNITIVE_GOALS: usize = 16;
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,59 +66,37 @@ pub fn register_rule(model_id:u64,event_kind:u16,task_kind:TaskKind,decision:Cog
 #[derive(Clone,Copy)]
 pub struct CognitiveInference{pub model_id:u64,pub decision:CognitiveDecision,pub capability_mask:u32,pub confidence:u8,pub reason:u8,pub value:u64}
 impl CognitiveInference{pub const EMPTY:Self=Self{model_id:0,decision:CognitiveDecision::None,capability_mask:0,confidence:0,reason:0,value:0};}
-
-fn self_model_bias(task:&CognitiveTask)->(u8,u32){
-    let entity=super::entity::state();
-    let mut capability=0;
-    if entity.resources.block_devices>0 { capability|=CAPABILITY_STORAGE; }
-    if entity.resources.relations>0 { capability|=CAPABILITY_PROCESS; }
-    let pressure=if entity.resources.objects>=64||entity.resources.cognitive_cycles>1_000_000{20}else{0};
-    (pressure,capability)
-}
-fn rule_inference(model:CognitiveModel,task:&CognitiveTask)->Option<CognitiveInference>{
-    let event_kind=(task.input>>48)as u16;let rules=RULES.lock();let mut selected:Option<CognitiveRule>=None;
-    for r in rules.get().iter(){if r.enabled&&r.model_id==model.id&&r.event_kind==event_kind&&r.task_kind==task.kind&&(selected.is_none()||r.priority>selected.unwrap().priority){selected=Some(*r)}}
-    selected.map(|r|{let(bias,cap)=self_model_bias(task);CognitiveInference{model_id:model.id,decision:r.decision,capability_mask:task.capability_mask|r.capability_mask|cap,confidence:100u8.saturating_sub(bias),reason:r.priority,value:task.input}})
-}
-fn infer_rule_based(model:CognitiveModel,task:&CognitiveTask)->CognitiveInference{
-    if let Some(i)=rule_inference(model,task){return i}
-    let event_kind=(task.input>>48)as u16;
-    let decision=match task.kind{TaskKind::Observe=>CognitiveDecision::Observe,TaskKind::Execute if event_kind==super::EventKind::DeviceTransferCompleted as u16=>CognitiveDecision::Execute,TaskKind::Execute|TaskKind::Research|TaskKind::Communicate=>CognitiveDecision::RequestAuthorization};
-    let(bias,cap)=self_model_bias(task);
-    CognitiveInference{model_id:model.id,decision,capability_mask:task.capability_mask|cap,confidence:50u8.saturating_sub(bias),reason:0,value:task.input}
-}
+fn self_model_bias(task:&CognitiveTask)->(u8,u32){let entity=super::entity::state();let mut capability=0;if entity.resources.block_devices>0{capability|=CAPABILITY_STORAGE;}if entity.resources.relations>0{capability|=CAPABILITY_PROCESS;}let pressure=if entity.resources.objects>=64||entity.resources.cognitive_cycles>1_000_000{20}else{0};(pressure,capability)}
+fn rule_inference(model:CognitiveModel,task:&CognitiveTask)->Option<CognitiveInference>{let event_kind=(task.input>>48)as u16;let rules=RULES.lock();let mut selected:Option<CognitiveRule>=None;for r in rules.get().iter(){if r.enabled&&r.model_id==model.id&&r.event_kind==event_kind&&r.task_kind==task.kind&&(selected.is_none()||r.priority>selected.unwrap().priority){selected=Some(*r)}}selected.map(|r|{let(bias,cap)=self_model_bias(task);CognitiveInference{model_id:model.id,decision:r.decision,capability_mask:task.capability_mask|r.capability_mask|cap,confidence:100u8.saturating_sub(bias),reason:r.priority,value:task.input}})}
+fn infer_rule_based(model:CognitiveModel,task:&CognitiveTask)->CognitiveInference{if let Some(i)=rule_inference(model,task){return i}let event_kind=(task.input>>48)as u16;let decision=match task.kind{TaskKind::Observe=>CognitiveDecision::Observe,TaskKind::Execute if event_kind==super::EventKind::DeviceTransferCompleted as u16=>CognitiveDecision::Execute,TaskKind::Execute|TaskKind::Research|TaskKind::Communicate=>CognitiveDecision::RequestAuthorization};let(bias,cap)=self_model_bias(task);CognitiveInference{model_id:model.id,decision,capability_mask:task.capability_mask|cap,confidence:50u8.saturating_sub(bias),reason:0,value:task.input}}
 fn infer(task:&CognitiveTask)->Result<CognitiveInference,&'static str>{let m=active_model().ok_or("no active cognitive model")?;match m.kind{ModelKind::RuleBased=>Ok(infer_rule_based(m,task)),ModelKind::Statistical|ModelKind::Neural=>Err("cognitive model backend is not implemented")}}
-pub fn plan_for_task(task_id:u64,kind:TaskKind,input:u64,capability_mask:u32)->Result<u64,&'static str>{let mut t=CognitiveTask::EMPTY;t.id=task_id;t.kind=kind;t.input=input;t.capability_mask=capability_mask;let i=infer(&t)?;let mut n=PLAN_NEXT_ID.lock();let id=*n.get();*n.get_mut()=id.wrapping_add(1).max(1);drop(n);for s in PLAN.lock().get_mut().iter_mut(){if matches!(s.state,PlanStepState::Empty|PlanStepState::Completed|PlanStepState::Failed){*s=CognitivePlanStep{id,task_id,action:i.decision,capability_mask:i.capability_mask,input,output:i.value,state:if i.decision==CognitiveDecision::RequestAuthorization{PlanStepState::AwaitingAuthorization}else{PlanStepState::Pending},dependency_count:0,dependencies:[0;MAX_COGNITIVE_STEP_DEPS]};return Ok(id)}}Err("cognitive plan full")}
+
+fn plan_index_for_task_locked(plan:&[CognitivePlanStep;MAX_COGNITIVE_PLAN_STEPS],task_id:u64)->Option<usize>{
+    plan.iter().position(|s|s.task_id==task_id&&matches!(s.state,PlanStepState::AwaitingAuthorization|PlanStepState::Pending|PlanStepState::Running))
+}
+fn dependency_reaches_locked(plan:&[CognitivePlanStep;MAX_COGNITIVE_PLAN_STEPS],start:u64,target:u64)->bool{
+    let mut frontier=[0u64;MAX_COGNITIVE_PLAN_STEPS];let mut count=1usize;frontier[0]=start;let mut seen=[0u64;MAX_COGNITIVE_PLAN_STEPS];let mut seen_count=0usize;
+    while count>0{
+        count-=1;let current=frontier[count];
+        if current==target{return true}
+        if seen[..seen_count].iter().any(|v|*v==current){continue}
+        if seen_count<MAX_COGNITIVE_PLAN_STEPS{seen[seen_count]=current;seen_count+=1;}
+        if let Some(step)=plan.iter().find(|s|s.id==current){
+            for i in 0..step.dependency_count as usize{
+                if count<MAX_COGNITIVE_PLAN_STEPS{frontier[count]=step.dependencies[i];count+=1;}
+            }
+        }
+    }
+    false
+}
+pub fn plan_for_task(task_id:u64,kind:TaskKind,input:u64,capability_mask:u32)->Result<u64,&'static str>{let mut t=CognitiveTask::EMPTY;t.id=task_id;t.kind=kind;t.input=input;t.capability_mask=capability_mask;let i=infer(&t)?;let mut p=PLAN.lock();if let Some(index)=plan_index_for_task_locked(p.get(),task_id){let s=&mut p.get_mut()[index];s.action=i.decision;s.capability_mask=i.capability_mask;s.input=input;if s.state==PlanStepState::AwaitingAuthorization&&i.decision!=CognitiveDecision::RequestAuthorization{s.state=PlanStepState::Pending;}return Ok(s.id);}let mut n=PLAN_NEXT_ID.lock();let id=*n.get();*n.get_mut()=id.wrapping_add(1).max(1);drop(n);for s in p.get_mut().iter_mut(){if matches!(s.state,PlanStepState::Empty|PlanStepState::Completed|PlanStepState::Failed){*s=CognitivePlanStep{id,task_id,action:i.decision,capability_mask:i.capability_mask,input,output:i.value,state:if i.decision==CognitiveDecision::RequestAuthorization{PlanStepState::AwaitingAuthorization}else{PlanStepState::Pending},dependency_count:0,dependencies:[0;MAX_COGNITIVE_STEP_DEPS]};return Ok(id)}}Err("cognitive plan full")}
 pub fn plan_step(id:u64)->Option<CognitivePlanStep>{PLAN.lock().get().iter().find(|s|s.id==id).copied()}
 pub fn plan_step_ready(id:u64)->bool{let p=PLAN.lock();let s=match p.get().iter().find(|s|s.id==id){Some(v)=>v,None=>return false};if s.state!=PlanStepState::Pending{return false}for i in 0..s.dependency_count as usize{let d=s.dependencies[i];match p.get().iter().find(|x|x.id==d){Some(x) if x.state==PlanStepState::Completed=>{},_=>return false}}true}
 pub fn complete_plan_step(id:u64,output:u64)->Result<(),&'static str>{let mut p=PLAN.lock();let s=p.get_mut().iter_mut().find(|s|s.id==id).ok_or("cognitive plan step not found")?;if s.state!=PlanStepState::Running{return Err("cognitive plan step is not running")}s.output=output;s.state=PlanStepState::Completed;Ok(())}
-pub fn add_plan_dependency(id:u64,dependency:u64)->Result<(),&'static str>{
-    if id==0 || dependency==0 || id==dependency { return Err("invalid cognitive plan dependency"); }
-    let mut p=PLAN.lock();
-    let index=match p.get().iter().position(|s|s.id==id){Some(v)=>v,None=>return Err("cognitive plan step not found")};
-    if !p.get().iter().any(|s|s.id==dependency){return Err("cognitive dependency not found");}
-    let s=&mut p.get_mut()[index];
-    if s.dependencies[..s.dependency_count as usize].iter().any(|v|*v==dependency){return Ok(());}
-    if s.dependency_count as usize>=MAX_COGNITIVE_STEP_DEPS{return Err("cognitive dependency list full");}
-    s.dependencies[s.dependency_count as usize]=dependency;
-    s.dependency_count+=1;
-    Ok(())
-}
-pub fn start_plan_step(id:u64)->Result<(),&'static str>{
-    if !plan_step_ready(id){return Err("cognitive plan step is not ready");}
-    let mut p=PLAN.lock();
-    let s=p.get_mut().iter_mut().find(|s|s.id==id).ok_or("cognitive plan step not found")?;
-    s.state=PlanStepState::Running;
-    Ok(())
-}
-pub fn fail_plan_step(id:u64,output:u64)->Result<(),&'static str>{
-    let mut p=PLAN.lock();
-    let s=p.get_mut().iter_mut().find(|s|s.id==id).ok_or("cognitive plan step not found")?;
-    if s.state!=PlanStepState::Running{return Err("cognitive plan step is not running");}
-    s.output=output;
-    s.state=PlanStepState::Failed;
-    Ok(())
-}
+pub fn add_plan_dependency(id:u64,dependency:u64)->Result<(),&'static str>{if id==0||dependency==0||id==dependency{return Err("invalid cognitive plan dependency")}let mut p=PLAN.lock();let index=match p.get().iter().position(|s|s.id==id){Some(v)=>v,None=>return Err("cognitive plan step not found")};if !p.get().iter().any(|s|s.id==dependency){return Err("cognitive dependency not found")}if dependency_reaches_locked(p.get(),dependency,id){return Err("cognitive plan dependency cycle")}let s=&mut p.get_mut()[index];if s.dependencies[..s.dependency_count as usize].iter().any(|v|*v==dependency){return Ok(())}if s.dependency_count as usize>=MAX_COGNITIVE_STEP_DEPS{return Err("cognitive dependency list full")}s.dependencies[s.dependency_count as usize]=dependency;s.dependency_count+=1;Ok(())}
+pub fn start_plan_step(id:u64)->Result<(),&'static str>{if !plan_step_ready(id){return Err("cognitive plan step is not ready")}let mut p=PLAN.lock();let s=p.get_mut().iter_mut().find(|s|s.id==id).ok_or("cognitive plan step not found")?;s.state=PlanStepState::Running;Ok(())}
+pub fn fail_plan_step(id:u64,output:u64)->Result<(),&'static str>{let mut p=PLAN.lock();let s=p.get_mut().iter_mut().find(|s|s.id==id).ok_or("cognitive plan step not found")?;if s.state!=PlanStepState::Running{return Err("cognitive plan step is not running")}s.output=output;s.state=PlanStepState::Failed;Ok(())}
+fn block_dependents(failed_id:u64){let mut p=PLAN.lock();let mut changed=[0u64;MAX_COGNITIVE_PLAN_STEPS];let mut changed_count=0usize;for s in p.get_mut().iter_mut(){if matches!(s.state,PlanStepState::Pending|PlanStepState::AwaitingAuthorization)&&s.dependencies[..s.dependency_count as usize].iter().any(|d|*d==failed_id){s.state=PlanStepState::Failed;if changed_count<MAX_COGNITIVE_PLAN_STEPS{changed[changed_count]=s.id;changed_count+=1;}}}drop(p);for id in changed[..changed_count].iter(){block_dependents(*id);}}
 
 pub const CAPABILITY_OBSERVE:u32=1<<0;pub const CAPABILITY_RESEARCH:u32=1<<1;pub const CAPABILITY_EXECUTE:u32=1<<2;pub const CAPABILITY_COMMUNICATE:u32=1<<3;pub const CAPABILITY_STORAGE:u32=1<<4;pub const CAPABILITY_NETWORK:u32=1<<5;pub const CAPABILITY_PROCESS:u32=1<<6;pub const CAPABILITY_ALL:u32=CAPABILITY_OBSERVE|CAPABILITY_RESEARCH|CAPABILITY_EXECUTE|CAPABILITY_COMMUNICATE|CAPABILITY_STORAGE|CAPABILITY_NETWORK|CAPABILITY_PROCESS;
 #[repr(u8)]#[derive(Clone,Copy,PartialEq,Eq)]pub enum TaskKind{Observe=1,Research=2,Execute=3,Communicate=4}
@@ -146,23 +123,10 @@ fn observation_task_kind(o:CognitiveObservation)->TaskKind{match o.event_kind{5|
 fn kind_capability(k:TaskKind)->u32{match k{TaskKind::Observe=>CAPABILITY_OBSERVE,TaskKind::Research=>CAPABILITY_RESEARCH,TaskKind::Execute=>CAPABILITY_EXECUTE,TaskKind::Communicate=>CAPABILITY_COMMUNICATE}}
 
 pub fn submit(kind:TaskKind,priority:u8,capability_mask:u32,input:u64)->Result<u64,&'static str>{let requested=capability_mask|kind_capability(kind);if requested&!CAPABILITY_ALL!=0{return Err("unknown cognitive capability")}let mut r=RUNTIME.lock();let rs=r.get_mut();let id=rs.next_id;rs.next_id=rs.next_id.wrapping_add(1).max(1);drop(r);for t in TASKS.lock().get_mut().iter_mut(){if matches!(t.state,TaskState::Empty|TaskState::Completed|TaskState::Failed){*t=CognitiveTask{id,kind,state:TaskState::Queued,phase:CognitivePhase::Idle,priority,capability_mask:requested,input,source:0,output:0,decision:CognitiveDecision::None,authorized:false};return Ok(id)}}Err("cognitive task queue full")}
-
-pub fn submit_goal(kind:TaskKind,priority:u8,capability_mask:u32,input:u64)->Result<u64,&'static str>{
-    if !GOALS.lock().get().iter().any(|g|g.state==GoalState::Empty||g.state==GoalState::Achieved||g.state==GoalState::Failed){return Err("cognitive goal registry full")}
-    let task_id=submit(kind,priority,capability_mask,input)?;
-    let mut next=GOAL_NEXT_ID.lock(); let id=*next.get(); *next.get_mut()=id.wrapping_add(1).max(1); drop(next);
-    let mut goals=GOALS.lock();
-    for goal in goals.get_mut().iter_mut(){
-        if goal.state==GoalState::Empty || goal.state==GoalState::Achieved || goal.state==GoalState::Failed {
-            *goal=CognitiveGoal{id,task_id,kind,priority,capability_mask:capability_mask|kind_capability(kind),input,state:GoalState::Pending,result:0};
-            return Ok(id);
-        }
-    }
-    Err("cognitive goal registry full")
-}
+pub fn submit_goal(kind:TaskKind,priority:u8,capability_mask:u32,input:u64)->Result<u64,&'static str>{if !GOALS.lock().get().iter().any(|g|g.state==GoalState::Empty||g.state==GoalState::Achieved||g.state==GoalState::Failed){return Err("cognitive goal registry full")}let task_id=submit(kind,priority,capability_mask,input)?;let mut next=GOAL_NEXT_ID.lock();let id=*next.get();*next.get_mut()=id.wrapping_add(1).max(1);drop(next);let mut goals=GOALS.lock();for goal in goals.get_mut().iter_mut(){if goal.state==GoalState::Empty||goal.state==GoalState::Achieved||goal.state==GoalState::Failed{*goal=CognitiveGoal{id,task_id,kind,priority,capability_mask:capability_mask|kind_capability(kind),input,state:GoalState::Pending,result:0};return Ok(id)}}Err("cognitive goal registry full")}
 pub fn goal(id:u64)->Option<CognitiveGoal>{GOALS.lock().get().iter().find(|g|g.id==id).copied()}
 pub fn goals()->[CognitiveGoal;MAX_COGNITIVE_GOALS]{*GOALS.lock().get()}
-fn update_goal_for_task(task:CognitiveTask,state:GoalState,result:u64){let mut goals=GOALS.lock();for g in goals.get_mut().iter_mut(){if g.task_id==task.id && g.state!=GoalState::Empty{g.state=state;g.result=result;break;}}}
+fn update_goal_for_task(task:CognitiveTask,state:GoalState,result:u64){let mut goals=GOALS.lock();for g in goals.get_mut().iter_mut(){if g.task_id==task.id&&g.state!=GoalState::Empty{g.state=state;g.result=result;break;}}}
 pub fn goal_for_task(task_id:u64)->Option<CognitiveGoal>{GOALS.lock().get().iter().find(|g|g.task_id==task_id&&g.state!=GoalState::Empty).copied()}
 fn activate_goal_for_task(task:CognitiveTask){let mut goals=GOALS.lock();for g in goals.get_mut().iter_mut(){if g.task_id==task.id&&g.state==GoalState::Pending{g.state=GoalState::Active;break;}}}
 
@@ -173,6 +137,6 @@ fn select_task(t:&[CognitiveTask;MAX_COGNITIVE_TASKS])->Option<usize>{let mut s=
 
 pub fn tick(){let mut r=RUNTIME.lock();let rs=r.get_mut();rs.cycles=rs.cycles.wrapping_add(1);let mut tasks=TASKS.lock();let i=match select_task(tasks.get()){Some(v)=>v,None=>{drop(tasks);if let Some(o)=consume_observation(){let k=observation_task_kind(o);let input=((o.event_kind as u64)<<48)|(o.value&0x0000_ffff_ffff_ffff);drop(r);let _=submit(k,0,0,input).map(|id|{if let Some(t)=TASKS.lock().get_mut().iter_mut().find(|t|t.id==id){t.source=o.source}});return}rs.active=0;rs.phase=CognitivePhase::Idle;return}};let t=&mut tasks.get_mut()[i];activate_goal_for_task(*t);rs.active=t.id;match t.phase{CognitivePhase::Idle=>{t.phase=CognitivePhase::Observe;t.state=TaskState::Planning;rs.phase=CognitivePhase::Observe},CognitivePhase::Observe=>{t.phase=CognitivePhase::Plan;rs.phase=CognitivePhase::Plan},CognitivePhase::Plan=>{if !t.authorized{t.decision=CognitiveDecision::RequestAuthorization;t.state=TaskState::AwaitingAuthorization;update_goal_for_task(*t,GoalState::AwaitingAuthorization,0);let _=plan_for_task(t.id,t.kind,t.input,t.capability_mask);remember(CognitiveMemoryEntry{id:0,kind:MemoryKind::Decision,task_id:t.id,event_kind:(t.input>>48)as u16,source:t.source,value:t.input,outcome:CognitiveDecision::RequestAuthorization as u64});rs.phase=CognitivePhase::Plan}else{match infer(t){Ok(i)=>{t.decision=i.decision;let _=plan_for_task(t.id,t.kind,t.input,i.capability_mask);t.phase=if i.decision==CognitiveDecision::Execute{CognitivePhase::Execute}else{CognitivePhase::Communicate};t.state=TaskState::Running;remember(CognitiveMemoryEntry{id:0,kind:MemoryKind::Decision,task_id:t.id,event_kind:(t.input>>48)as u16,source:t.source,value:i.value,outcome:i.decision as u64});rs.phase=t.phase},Err(_)=>{t.state=TaskState::Failed;t.phase=CognitivePhase::Idle;update_goal_for_task(*t,GoalState::Failed,0);rs.failed=rs.failed.wrapping_add(1)}}}},CognitivePhase::Execute=>{},CognitivePhase::Verify=>{t.phase=CognitivePhase::Communicate;rs.phase=CognitivePhase::Communicate},CognitivePhase::Communicate=>{t.state=TaskState::Completed;t.phase=CognitivePhase::Idle;remember(CognitiveMemoryEntry{id:0,kind:MemoryKind::Completion,task_id:t.id,event_kind:(t.input>>48)as u16,source:t.source,value:t.output,outcome:1});rs.completed=rs.completed.wrapping_add(1);rs.phase=CognitivePhase::Idle;rs.active=0}}}
 
-pub fn execute_authorized(){let pending={let t=TASKS.lock();t.get().iter().find(|t|t.state==TaskState::Running&&t.authorized).copied()};let task=match pending{Some(v)=>v,None=>return};let plan={let p=PLAN.lock();p.get().iter().rev().find(|s|s.task_id==task.id&&matches!(s.state,PlanStepState::Pending|PlanStepState::Running)).map(|s|s.id)};let plan_id=match plan{Some(v)=>v,None=>return};if plan_step_ready(plan_id){let _=start_plan_step(plan_id);}let result=match task.kind{TaskKind::Execute if task.input>>48==super::EventKind::DeviceTransferCompleted as u64=>super::runtime::prepare_bennufs_mount(super::ObjectId(task.source)),TaskKind::Observe=>Ok(()),_=>Err("cognitive action has no kernel executor")};let mut t=TASKS.lock();if let Some(c)=t.get_mut().iter_mut().find(|c|c.id==task.id){match result{Ok(())=>{c.output=1;c.decision=CognitiveDecision::Verify;c.phase=CognitivePhase::Verify;c.state=TaskState::Verifying;let _=complete_plan_step(plan_id,1);update_goal_for_task(*c,GoalState::Achieved,1);remember(CognitiveMemoryEntry{id:0,kind:MemoryKind::Result,task_id:c.id,event_kind:(c.input>>48)as u16,source:c.source,value:c.input,outcome:1})},Err(_)=>{c.output=0;c.state=TaskState::Failed;c.phase=CognitivePhase::Idle;let _=fail_plan_step(plan_id,0);update_goal_for_task(*c,GoalState::Failed,0);remember(CognitiveMemoryEntry{id:0,kind:MemoryKind::Result,task_id:c.id,event_kind:(c.input>>48)as u16,source:c.source,value:c.input,outcome:0})}}}}
+pub fn execute_authorized(){let pending={let t=TASKS.lock();t.get().iter().find(|t|t.state==TaskState::Running&&t.authorized).copied()};let task=match pending{Some(v)=>v,None=>return};let plan={let p=PLAN.lock();p.get().iter().find(|s|s.task_id==task.id&&s.state==PlanStepState::Pending).map(|s|s.id)};let plan_id=match plan{Some(v)=>v,None=>return};if start_plan_step(plan_id).is_err(){return}let result=match task.kind{TaskKind::Execute if task.input>>48==super::EventKind::DeviceTransferCompleted as u64=>super::runtime::prepare_bennufs_mount(super::ObjectId(task.source)),TaskKind::Observe=>Ok(()),_=>Err("cognitive action has no kernel executor")};let mut t=TASKS.lock();if let Some(c)=t.get_mut().iter_mut().find(|c|c.id==task.id){match result{Ok(())=>{c.output=1;c.decision=CognitiveDecision::Verify;c.phase=CognitivePhase::Verify;c.state=TaskState::Verifying;let _=complete_plan_step(plan_id,1);update_goal_for_task(*c,GoalState::Active,1);remember(CognitiveMemoryEntry{id:0,kind:MemoryKind::Result,task_id:c.id,event_kind:(c.input>>48)as u16,source:c.source,value:c.input,outcome:1})},Err(_)=>{c.output=0;c.state=TaskState::Failed;c.phase=CognitivePhase::Idle;let _=fail_plan_step(plan_id,0);block_dependents(plan_id);update_goal_for_task(*c,GoalState::Failed,0);remember(CognitiveMemoryEntry{id:0,kind:MemoryKind::Result,task_id:c.id,event_kind:(c.input>>48)as u16,source:c.source,value:c.input,outcome:0})}}}}
 pub fn runtime()->CognitiveRuntime{*RUNTIME.lock().get()}
 pub fn task(id:u64)->Option<CognitiveTask>{TASKS.lock().get().iter().find(|t|t.id==id).copied()}
