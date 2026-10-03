@@ -361,6 +361,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         model::runtime::service_device_io();
         model::runtime::service_device_events();
         model::intelligence::tick();
+        model::intelligence::execute_authorized();
         render_compositor(boot_info);
         if scheduler.step().is_none() {
             core::hint::spin_loop();
