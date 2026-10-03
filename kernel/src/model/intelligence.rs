@@ -61,6 +61,7 @@ pub struct CognitiveTask {
     pub capability_mask: u32,
     pub input: u64,
     pub output: u64,
+    pub authorized: bool,
 }
 
 impl CognitiveTask {
@@ -73,6 +74,7 @@ impl CognitiveTask {
         capability_mask: 0,
         input: 0,
         output: 0,
+        authorized: false,
     };
 }
 
@@ -85,7 +87,6 @@ pub struct CognitiveRuntime {
     pub cycles: u64,
     pub completed: u64,
     pub failed: u64,
-    pub authorized_mask: u32,
 }
 
 impl CognitiveRuntime {
@@ -96,7 +97,6 @@ impl CognitiveRuntime {
         cycles: 0,
         completed: 0,
         failed: 0,
-        authorized_mask: 0,
     };
 }
 
@@ -107,24 +107,6 @@ static RUNTIME: SpinLock<CognitiveRuntime> = SpinLock::new(CognitiveRuntime::EMP
 pub fn init() {
     *RUNTIME.lock().get_mut() = CognitiveRuntime::EMPTY;
     *TASKS.lock().get_mut() = [CognitiveTask::EMPTY; MAX_COGNITIVE_TASKS];
-}
-
-pub fn authorize(capability_mask: u32) {
-    let mut runtime = RUNTIME.lock();
-    runtime.get_mut().authorized_mask |= capability_mask & CAPABILITY_ALL;
-}
-
-pub fn revoke(capability_mask: u32) {
-    let mut runtime = RUNTIME.lock();
-    runtime.get_mut().authorized_mask &= !(capability_mask & CAPABILITY_ALL);
-}
-
-pub fn revoke_all() {
-    RUNTIME.lock().get_mut().authorized_mask = 0;
-}
-
-pub fn authorization_mask() -> u32 {
-    RUNTIME.lock().get().authorized_mask
 }
 
 fn kind_capability(kind: TaskKind) -> u32 {
@@ -168,6 +150,7 @@ pub fn submit(
                 capability_mask: requested,
                 input,
                 output: 0,
+                authorized: false,
             };
             return Ok(id);
         }
@@ -175,17 +158,53 @@ pub fn submit(
     Err("cognitive task queue full")
 }
 
-fn select_task(
-    tasks: &[CognitiveTask; MAX_COGNITIVE_TASKS],
-    authorized_mask: u32,
-) -> Option<usize> {
+pub fn authorize_task(id: u64) -> Result<(), &'static str> {
+    let mut tasks = TASKS.lock();
+    let task = tasks
+        .get_mut()
+        .iter_mut()
+        .find(|task| task.id == id)
+        .ok_or("cognitive task not found")?;
+
+    match task.state {
+        TaskState::AwaitingAuthorization | TaskState::Planning => {
+            task.authorized = true;
+            Ok(())
+        }
+        TaskState::Queued | TaskState::Running | TaskState::Verifying => {
+            Err("cognitive task is not awaiting authorization")
+        }
+        TaskState::Completed | TaskState::Failed => {
+            Err("cognitive task already finished")
+        }
+        TaskState::Empty => Err("cognitive task not found"),
+    }
+}
+
+pub fn deny_task(id: u64) -> Result<(), &'static str> {
+    let mut tasks = TASKS.lock();
+    let task = tasks
+        .get_mut()
+        .iter_mut()
+        .find(|task| task.id == id)
+        .ok_or("cognitive task not found")?;
+
+    if task.state != TaskState::AwaitingAuthorization {
+        return Err("cognitive task is not awaiting authorization");
+    }
+
+    task.state = TaskState::Failed;
+    task.authorized = false;
+    Ok(())
+}
+
+fn select_task(tasks: &[CognitiveTask; MAX_COGNITIVE_TASKS]) -> Option<usize> {
     let mut selected = None;
     let mut priority = 0u8;
     for (index, task) in tasks.iter().enumerate() {
-        let eligible = task.state == TaskState::Queued
-            || (task.state == TaskState::AwaitingAuthorization
-                && task.capability_mask & !authorized_mask == 0);
-        if eligible && (selected.is_none() || task.priority > priority) {
+        if task.state == TaskState::Queued
+            && (selected.is_none() || task.priority > priority)
+        {
             selected = Some(index);
             priority = task.priority;
         }
@@ -197,10 +216,9 @@ pub fn tick() {
     let mut runtime = RUNTIME.lock();
     let runtime_state = runtime.get_mut();
     runtime_state.cycles = runtime_state.cycles.wrapping_add(1);
-    let authorized_mask = runtime_state.authorized_mask;
 
     let mut tasks = TASKS.lock();
-    let index = match select_task(tasks.get(), authorized_mask) {
+    let index = match select_task(tasks.get()) {
         Some(value) => value,
         None => {
             runtime_state.active = 0;
@@ -223,7 +241,7 @@ pub fn tick() {
             runtime_state.phase = CognitivePhase::Plan;
         }
         CognitivePhase::Plan => {
-            if task.capability_mask & !runtime_state.authorized_mask != 0 {
+            if !task.authorized {
                 task.state = TaskState::AwaitingAuthorization;
                 runtime_state.phase = CognitivePhase::Plan;
             } else {
@@ -233,7 +251,7 @@ pub fn tick() {
             }
         }
         CognitivePhase::Execute => {
-            if task.capability_mask & !runtime_state.authorized_mask != 0 {
+            if !task.authorized {
                 task.state = TaskState::AwaitingAuthorization;
                 runtime_state.phase = CognitivePhase::Plan;
                 task.phase = CognitivePhase::Plan;
