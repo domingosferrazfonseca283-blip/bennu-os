@@ -174,13 +174,17 @@ pub fn submit(
     Err("cognitive task queue full")
 }
 
-fn select_task(tasks: &[CognitiveTask; MAX_COGNITIVE_TASKS]) -> Option<usize> {
+fn select_task(
+    tasks: &[CognitiveTask; MAX_COGNITIVE_TASKS],
+    authorized_mask: u32,
+) -> Option<usize> {
     let mut selected = None;
     let mut priority = 0u8;
     for (index, task) in tasks.iter().enumerate() {
-        if task.state == TaskState::Queued
-            && (selected.is_none() || task.priority > priority)
-        {
+        let eligible = task.state == TaskState::Queued
+            || (task.state == TaskState::AwaitingAuthorization
+                && task.capability_mask & !authorized_mask == 0);
+        if eligible && (selected.is_none() || task.priority > priority) {
             selected = Some(index);
             priority = task.priority;
         }
@@ -193,7 +197,7 @@ pub fn tick() {
     runtime.cycles = runtime.cycles.wrapping_add(1);
 
     let mut tasks = TASKS.lock();
-    let index = match select_task(&tasks) {
+    let index = match select_task(&tasks, runtime.authorized_mask) {
         Some(value) => value,
         None => {
             runtime.active = 0;
