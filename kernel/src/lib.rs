@@ -158,6 +158,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     drivers::keyboard::init();
     drivers::console::init();
     model::runtime::init();
+    model::intelligence::init();
     model::graphics::init();
     model::surface::init();
     model::window::init();
@@ -359,6 +360,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         model::runtime::service_block_io();
         model::runtime::service_device_io();
         model::runtime::service_device_events();
+        model::intelligence::tick();
         render_compositor(boot_info);
         if scheduler.step().is_none() {
             core::hint::spin_loop();
