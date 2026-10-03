@@ -227,6 +227,7 @@ fn emit_unlocked(state: &mut RuntimeState, event: Event) -> Result<(), &'static 
     if next == state.event_head { return Err("event fabric full"); }
     state.events[state.event_tail] = event;
     state.event_tail = next;
+    let _ = super::intelligence::observe(event);
     Ok(())
 }
 
