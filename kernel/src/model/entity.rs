@@ -4,15 +4,8 @@ use super::sync::SpinLock;
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum EntityLifeState {
-    Initializing = 0,
-    Awake = 1,
-    Observing = 2,
-    Thinking = 3,
-    Acting = 4,
-    Verifying = 5,
-    Communicating = 6,
-    Sleeping = 7,
-    Halted = 8,
+    Initializing = 0, Awake = 1, Observing = 2, Thinking = 3, Acting = 4,
+    Verifying = 5, Communicating = 6, Sleeping = 7, Halted = 8,
 }
 
 #[repr(C)]
@@ -22,18 +15,15 @@ pub struct EntityResourceSnapshot {
     pub cells: u32,
     pub block_devices: u32,
     pub mounts: u32,
+    pub relations: u32,
     pub heartbeat: u64,
     pub cognitive_cycles: u64,
 }
 
 impl EntityResourceSnapshot {
     pub const EMPTY: Self = Self {
-        objects: 0,
-        cells: 0,
-        block_devices: 0,
-        mounts: 0,
-        heartbeat: 0,
-        cognitive_cycles: 0,
+        objects: 0, cells: 0, block_devices: 0, mounts: 0, relations: 0,
+        heartbeat: 0, cognitive_cycles: 0,
     };
 }
 
@@ -58,32 +48,18 @@ pub struct BennuEntity {
 
 impl BennuEntity {
     pub const EMPTY: Self = Self {
-        identity: 0x4245_4e4e_5500_0001,
-        generation: 1,
-        life_state: EntityLifeState::Initializing,
-        cognitive_phase: CognitivePhase::Idle,
-        heartbeat: 0,
-        observations: 0,
-        decisions: 0,
-        actions: 0,
-        verifications: 0,
-        communications: 0,
-        last_event_kind: 0,
-        last_source: 0,
-        last_value: 0,
+        identity: 0x4245_4e4e_5500_0001, generation: 1,
+        life_state: EntityLifeState::Initializing, cognitive_phase: CognitivePhase::Idle,
+        heartbeat: 0, observations: 0, decisions: 0, actions: 0, verifications: 0,
+        communications: 0, last_event_kind: 0, last_source: 0, last_value: 0,
         resources: EntityResourceSnapshot::EMPTY,
     };
 }
 
 static ENTITY: SpinLock<BennuEntity> = SpinLock::new(BennuEntity::EMPTY);
 
-pub fn init() {
-    *ENTITY.lock().get_mut() = BennuEntity::EMPTY;
-}
-
-pub fn state() -> BennuEntity {
-    *ENTITY.lock().get()
-}
+pub fn init() { *ENTITY.lock().get_mut() = BennuEntity::EMPTY; }
+pub fn state() -> BennuEntity { *ENTITY.lock().get() }
 
 pub fn heartbeat(phase: CognitivePhase) {
     let mut guard = ENTITY.lock();
@@ -110,34 +86,21 @@ pub fn observe(event: super::Event) {
     entity.last_value = event.value;
 }
 
-pub fn decision() {
-    let mut guard = ENTITY.lock();
-    guard.get_mut().decisions = guard.get().decisions.wrapping_add(1);
-}
-
-pub fn action() {
-    let mut guard = ENTITY.lock();
-    guard.get_mut().actions = guard.get().actions.wrapping_add(1);
-}
-
-pub fn verification() {
-    let mut guard = ENTITY.lock();
-    guard.get_mut().verifications = guard.get().verifications.wrapping_add(1);
-}
-
-pub fn communication() {
-    let mut guard = ENTITY.lock();
-    guard.get_mut().communications = guard.get().communications.wrapping_add(1);
-}
+pub fn decision() { let mut g=ENTITY.lock(); let e=g.get_mut(); e.decisions=e.decisions.wrapping_add(1); }
+pub fn action() { let mut g=ENTITY.lock(); let e=g.get_mut(); e.actions=e.actions.wrapping_add(1); }
+pub fn verification() { let mut g=ENTITY.lock(); let e=g.get_mut(); e.verifications=e.verifications.wrapping_add(1); }
+pub fn communication() { let mut g=ENTITY.lock(); let e=g.get_mut(); e.communications=e.communications.wrapping_add(1); }
 
 pub fn refresh_resources() {
     let (objects, cells, block_devices, mounts) = super::runtime::resource_counts();
     let cognitive = super::intelligence::runtime();
+    let relations = super::graph::count();
     let mut guard = ENTITY.lock();
     let entity = guard.get_mut();
     entity.resources.objects = objects;
     entity.resources.cells = cells;
     entity.resources.block_devices = block_devices;
     entity.resources.mounts = mounts;
+    entity.resources.relations = relations as u32;
     entity.resources.cognitive_cycles = cognitive.cycles;
 }
