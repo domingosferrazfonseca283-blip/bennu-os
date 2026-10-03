@@ -71,7 +71,6 @@ pub fn memory() -> [CognitiveMemoryEntry; MAX_COGNITIVE_MEMORY] {
     *MEMORY.lock().get()
 }
 
-
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PlanStepState {
@@ -149,17 +148,31 @@ pub fn register_model(kind: ModelKind, version: u32, memory_object: u64, bytes: 
     if version == 0 || memory_object == 0 || bytes == 0 {
         return Err("invalid cognitive model");
     }
-    if super::runtime::object_frames(super::ObjectId(memory_object)).is_none() {
-        return Err("cognitive model memory is not valid");
+    let (_, pages) = super::runtime::object_frames(super::ObjectId(memory_object))
+        .ok_or("cognitive model memory is not valid")?;
+    let backing_bytes = (pages as u64)
+        .checked_mul(crate::memory::PAGE_SIZE)
+        .ok_or("cognitive model backing size overflow")?;
+    if bytes > backing_bytes {
+        return Err("cognitive model exceeds backing memory");
     }
+
     let mut next = MODEL_NEXT_ID.lock();
     let id = *next.get();
     *next.get_mut() = id.wrapping_add(1).max(1);
     drop(next);
+
     let mut models = MODELS.lock();
     for slot in models.get_mut().iter_mut() {
         if !slot.active {
-            *slot = CognitiveModel { id, kind, version, memory_object, bytes, active: true };
+            *slot = CognitiveModel {
+                id,
+                kind,
+                version,
+                memory_object,
+                bytes,
+                active: true,
+            };
             return Ok(id);
         }
     }
@@ -182,18 +195,73 @@ pub fn active_model() -> Option<CognitiveModel> {
     models.get().iter().find(|model| model.active).copied()
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CognitiveInference {
+    pub model_id: u64,
+    pub decision: CognitiveDecision,
+    pub capability_mask: u32,
+    pub confidence: u8,
+    pub reason: u8,
+    pub value: u64,
+}
+
+impl CognitiveInference {
+    pub const EMPTY: Self = Self {
+        model_id: 0,
+        decision: CognitiveDecision::None,
+        capability_mask: 0,
+        confidence: 0,
+        reason: 0,
+        value: 0,
+    };
+}
+
+fn infer_rule_based(model: CognitiveModel, task: &CognitiveTask) -> CognitiveInference {
+    let event_kind = (task.input >> 48) as u16;
+    let decision = match task.kind {
+        TaskKind::Observe => CognitiveDecision::Observe,
+        TaskKind::Execute if event_kind == super::EventKind::DeviceTransferCompleted as u16 => {
+            CognitiveDecision::Execute
+        }
+        TaskKind::Execute => CognitiveDecision::RequestAuthorization,
+        TaskKind::Research | TaskKind::Communicate => CognitiveDecision::RequestAuthorization,
+    };
+
+    CognitiveInference {
+        model_id: model.id,
+        decision,
+        capability_mask: task.capability_mask,
+        confidence: if decision == CognitiveDecision::Execute { 100 } else { 90 },
+        reason: event_kind as u8,
+        value: task.input,
+    }
+}
+
+fn infer(task: &CognitiveTask) -> Result<CognitiveInference, &'static str> {
+    let model = active_model().ok_or("no active cognitive model")?;
+    match model.kind {
+        ModelKind::RuleBased => Ok(infer_rule_based(model, task)),
+        ModelKind::Statistical | ModelKind::Neural => {
+            Err("cognitive model backend is not implemented")
+        }
+    }
+}
 
 pub fn plan_for_task(task_id: u64, kind: TaskKind, input: u64, capability_mask: u32) -> Result<u64, &'static str> {
-    let action = match kind {
-        TaskKind::Observe => CognitiveDecision::Observe,
-        TaskKind::Execute => CognitiveDecision::Execute,
-        TaskKind::Research => CognitiveDecision::RequestAuthorization,
-        TaskKind::Communicate => CognitiveDecision::RequestAuthorization,
-    };
+    let mut task = CognitiveTask::EMPTY;
+    task.id = task_id;
+    task.kind = kind;
+    task.input = input;
+    task.capability_mask = capability_mask;
+    let inference = infer(&task)?;
+    let action = inference.decision;
+
     let mut next = PLAN_NEXT_ID.lock();
     let id = *next.get();
     *next.get_mut() = id.wrapping_add(1).max(1);
     drop(next);
+
     let mut plan = PLAN.lock();
     for step in plan.get_mut().iter_mut() {
         if step.state == PlanStepState::Empty || step.state == PlanStepState::Completed || step.state == PlanStepState::Failed {
@@ -201,10 +269,14 @@ pub fn plan_for_task(task_id: u64, kind: TaskKind, input: u64, capability_mask: 
                 id,
                 task_id,
                 action,
-                capability_mask,
+                capability_mask: inference.capability_mask,
                 input,
-                output: 0,
-                state: if action == CognitiveDecision::RequestAuthorization { PlanStepState::AwaitingAuthorization } else { PlanStepState::Pending },
+                output: inference.value,
+                state: if action == CognitiveDecision::RequestAuthorization {
+                    PlanStepState::AwaitingAuthorization
+                } else {
+                    PlanStepState::Pending
+                },
             };
             return Ok(id);
         }
@@ -612,35 +684,36 @@ pub fn tick() {
                 });
                 runtime_state.phase = CognitivePhase::Plan;
             } else {
-                task.decision = CognitiveDecision::Execute;
-                let _ = plan_for_task(task.id, task.kind, task.input, task.capability_mask);
-                task.phase = CognitivePhase::Execute;
-                task.state = TaskState::Running;
-                remember(CognitiveMemoryEntry {
-                    id: 0,
-                    kind: MemoryKind::Decision,
-                    task_id: task.id,
-                    event_kind: (task.input >> 48) as u16,
-                    source: task.source,
-                    value: task.input,
-                    outcome: CognitiveDecision::Execute as u64,
-                });
-                runtime_state.phase = CognitivePhase::Execute;
+                match infer(task) {
+                    Ok(inference) => {
+                        task.decision = inference.decision;
+                        let _ = plan_for_task(task.id, task.kind, task.input, inference.capability_mask);
+                        task.phase = if inference.decision == CognitiveDecision::Execute {
+                            CognitivePhase::Execute
+                        } else {
+                            CognitivePhase::Communicate
+                        };
+                        task.state = TaskState::Running;
+                        remember(CognitiveMemoryEntry {
+                            id: 0,
+                            kind: MemoryKind::Decision,
+                            task_id: task.id,
+                            event_kind: (task.input >> 48) as u16,
+                            source: task.source,
+                            value: inference.value,
+                            outcome: inference.decision as u64,
+                        });
+                        runtime_state.phase = task.phase;
+                    }
+                    Err(_) => {
+                        task.state = TaskState::Failed;
+                        task.phase = CognitivePhase::Idle;
+                        runtime_state.failed = runtime_state.failed.wrapping_add(1);
+                    }
+                }
             }
         }
-        CognitivePhase::Execute => {
-            if !task.authorized {
-                task.decision = CognitiveDecision::RequestAuthorization;
-                task.state = TaskState::AwaitingAuthorization;
-                runtime_state.phase = CognitivePhase::Plan;
-                task.phase = CognitivePhase::Plan;
-            } else {
-                task.decision = CognitiveDecision::Verify;
-                task.phase = CognitivePhase::Verify;
-                task.state = TaskState::Verifying;
-                runtime_state.phase = CognitivePhase::Verify;
-            }
-        }
+        CognitivePhase::Execute => {}
         CognitivePhase::Verify => {
             task.phase = CognitivePhase::Communicate;
             runtime_state.phase = CognitivePhase::Communicate;
