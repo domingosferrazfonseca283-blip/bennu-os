@@ -4,6 +4,7 @@ pub const MAX_COGNITIVE_TASKS: usize = 16;
 pub const MAX_COGNITIVE_OBSERVATIONS: usize = 32;
 pub const MAX_COGNITIVE_MEMORY: usize = 64;
 pub const MAX_COGNITIVE_PLAN_STEPS: usize = 8;
+pub const MAX_COGNITIVE_MODELS: usize = 4;
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -109,6 +110,78 @@ impl CognitivePlanStep {
 static PLAN: SpinLock<[CognitivePlanStep; MAX_COGNITIVE_PLAN_STEPS]> =
     SpinLock::new([CognitivePlanStep::EMPTY; MAX_COGNITIVE_PLAN_STEPS]);
 static PLAN_NEXT_ID: SpinLock<u64> = SpinLock::new(1);
+
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ModelKind {
+    RuleBased = 1,
+    Statistical = 2,
+    Neural = 3,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CognitiveModel {
+    pub id: u64,
+    pub kind: ModelKind,
+    pub version: u32,
+    pub memory_object: u64,
+    pub bytes: u64,
+    pub active: bool,
+}
+
+impl CognitiveModel {
+    pub const EMPTY: Self = Self {
+        id: 0,
+        kind: ModelKind::RuleBased,
+        version: 0,
+        memory_object: 0,
+        bytes: 0,
+        active: false,
+    };
+}
+
+static MODELS: SpinLock<[CognitiveModel; MAX_COGNITIVE_MODELS]> =
+    SpinLock::new([CognitiveModel::EMPTY; MAX_COGNITIVE_MODELS]);
+static MODEL_NEXT_ID: SpinLock<u64> = SpinLock::new(1);
+
+pub fn register_model(kind: ModelKind, version: u32, memory_object: u64, bytes: u64) -> Result<u64, &'static str> {
+    if version == 0 || memory_object == 0 || bytes == 0 {
+        return Err("invalid cognitive model");
+    }
+    if super::runtime::object_frames(super::ObjectId(memory_object)).is_none() {
+        return Err("cognitive model memory is not valid");
+    }
+    let mut next = MODEL_NEXT_ID.lock();
+    let id = *next.get();
+    *next.get_mut() = id.wrapping_add(1).max(1);
+    drop(next);
+    let mut models = MODELS.lock();
+    for slot in models.get_mut().iter_mut() {
+        if !slot.active {
+            *slot = CognitiveModel { id, kind, version, memory_object, bytes, active: true };
+            return Ok(id);
+        }
+    }
+    Err("cognitive model registry full")
+}
+
+pub fn activate_model(id: u64) -> Result<(), &'static str> {
+    let mut models = MODELS.lock();
+    if !models.get().iter().any(|model| model.id == id && model.active) {
+        return Err("cognitive model not found");
+    }
+    for model in models.get_mut().iter_mut() {
+        model.active = model.id == id;
+    }
+    Ok(())
+}
+
+pub fn active_model() -> Option<CognitiveModel> {
+    let models = MODELS.lock();
+    models.get().iter().find(|model| model.active).copied()
+}
+
 
 pub fn plan_for_task(task_id: u64, kind: TaskKind, input: u64, capability_mask: u32) -> Result<u64, &'static str> {
     let action = match kind {
@@ -311,6 +384,8 @@ pub fn init() {
     *MEMORY_NEXT_ID.lock().get_mut() = 1;
     *PLAN.lock().get_mut() = [CognitivePlanStep::EMPTY; MAX_COGNITIVE_PLAN_STEPS];
     *PLAN_NEXT_ID.lock().get_mut() = 1;
+    *MODELS.lock().get_mut() = [CognitiveModel::EMPTY; MAX_COGNITIVE_MODELS];
+    *MODEL_NEXT_ID.lock().get_mut() = 1;
 }
 
 pub fn observe(event: super::Event) -> Result<(), &'static str> {
