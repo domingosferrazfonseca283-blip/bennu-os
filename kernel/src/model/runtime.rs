@@ -227,7 +227,10 @@ fn emit_unlocked(state: &mut RuntimeState, event: Event) -> Result<(), &'static 
     if next == state.event_head { return Err("event fabric full"); }
     state.events[state.event_tail] = event;
     state.event_tail = next;
-    let _ = super::intelligence::observe(event);
+    if super::intelligence::observe(event).is_err() {
+        // The event fabric remains authoritative; cognition may fall behind
+        // under load without dropping the kernel event itself.
+    }
     Ok(())
 }
 
