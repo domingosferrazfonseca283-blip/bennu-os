@@ -2,6 +2,72 @@ use super::sync::SpinLock;
 
 pub const MAX_COGNITIVE_TASKS: usize = 16;
 pub const MAX_COGNITIVE_OBSERVATIONS: usize = 32;
+pub const MAX_COGNITIVE_MEMORY: usize = 64;
+
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MemoryKind {
+    Observation = 1,
+    Decision = 2,
+    Result = 3,
+    Completion = 4,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CognitiveMemoryEntry {
+    pub id: u64,
+    pub kind: MemoryKind,
+    pub task_id: u64,
+    pub event_kind: u16,
+    pub source: u64,
+    pub value: u64,
+    pub outcome: u64,
+}
+
+impl CognitiveMemoryEntry {
+    pub const EMPTY: Self = Self {
+        id: 0,
+        kind: MemoryKind::Observation,
+        task_id: 0,
+        event_kind: 0,
+        source: 0,
+        value: 0,
+        outcome: 0,
+    };
+}
+
+static MEMORY: SpinLock<[CognitiveMemoryEntry; MAX_COGNITIVE_MEMORY]> =
+    SpinLock::new([CognitiveMemoryEntry::EMPTY; MAX_COGNITIVE_MEMORY]);
+static MEMORY_NEXT_ID: SpinLock<u64> = SpinLock::new(1);
+
+pub fn remember(entry: CognitiveMemoryEntry) -> u64 {
+    let id = {
+        let mut next = MEMORY_NEXT_ID.lock();
+        let value = *next.get();
+        *next.get_mut() = value.wrapping_add(1).max(1);
+        value
+    };
+
+    let mut memory = MEMORY.lock();
+    let index = ((id - 1) as usize) % MAX_COGNITIVE_MEMORY;
+    let mut value = entry;
+    value.id = id;
+    memory.get_mut()[index] = value;
+    id
+}
+
+pub fn recall(id: u64) -> Option<CognitiveMemoryEntry> {
+    if id == 0 {
+        return None;
+    }
+    let memory = MEMORY.lock();
+    memory.get().iter().find(|entry| entry.id == id).copied()
+}
+
+pub fn memory() -> [CognitiveMemoryEntry; MAX_COGNITIVE_MEMORY] {
+    *MEMORY.lock().get()
+}
 
 pub const CAPABILITY_OBSERVE: u32 = 1 << 0;
 pub const CAPABILITY_RESEARCH: u32 = 1 << 1;
@@ -165,6 +231,8 @@ pub fn init() {
     *RUNTIME.lock().get_mut() = CognitiveRuntime::EMPTY;
     *TASKS.lock().get_mut() = [CognitiveTask::EMPTY; MAX_COGNITIVE_TASKS];
     *OBSERVATIONS.lock().get_mut() = [CognitiveObservation::EMPTY; MAX_COGNITIVE_OBSERVATIONS];
+    *MEMORY.lock().get_mut() = [CognitiveMemoryEntry::EMPTY; MAX_COGNITIVE_MEMORY];
+    *MEMORY_NEXT_ID.lock().get_mut() = 1;
 }
 
 pub fn observe(event: super::Event) -> Result<(), &'static str> {
@@ -177,6 +245,15 @@ pub fn observe(event: super::Event) -> Result<(), &'static str> {
                 target: event.target.0,
                 value: event.value,
             };
+            remember(CognitiveMemoryEntry {
+                id: 0,
+                kind: MemoryKind::Observation,
+                task_id: 0,
+                event_kind: event.kind as u16,
+                source: event.source.0,
+                value: event.value,
+                outcome: event.target.0,
+            });
             return Ok(());
         }
     }
@@ -360,11 +437,29 @@ pub fn tick() {
             if !task.authorized {
                 task.decision = CognitiveDecision::RequestAuthorization;
                 task.state = TaskState::AwaitingAuthorization;
+                remember(CognitiveMemoryEntry {
+                    id: 0,
+                    kind: MemoryKind::Decision,
+                    task_id: task.id,
+                    event_kind: (task.input >> 48) as u16,
+                    source: task.source,
+                    value: task.input,
+                    outcome: CognitiveDecision::RequestAuthorization as u64,
+                });
                 runtime_state.phase = CognitivePhase::Plan;
             } else {
                 task.decision = CognitiveDecision::Execute;
                 task.phase = CognitivePhase::Execute;
                 task.state = TaskState::Running;
+                remember(CognitiveMemoryEntry {
+                    id: 0,
+                    kind: MemoryKind::Decision,
+                    task_id: task.id,
+                    event_kind: (task.input >> 48) as u16,
+                    source: task.source,
+                    value: task.input,
+                    outcome: CognitiveDecision::Execute as u64,
+                });
                 runtime_state.phase = CognitivePhase::Execute;
             }
         }
@@ -388,6 +483,15 @@ pub fn tick() {
         CognitivePhase::Communicate => {
             task.state = TaskState::Completed;
             task.phase = CognitivePhase::Idle;
+            remember(CognitiveMemoryEntry {
+                id: 0,
+                kind: MemoryKind::Completion,
+                task_id: task.id,
+                event_kind: (task.input >> 48) as u16,
+                source: task.source,
+                value: task.output,
+                outcome: 1,
+            });
             runtime_state.completed = runtime_state.completed.wrapping_add(1);
             runtime_state.phase = CognitivePhase::Idle;
             runtime_state.active = 0;
@@ -409,8 +513,35 @@ pub fn execute_authorized() {
     let mut tasks = TASKS.lock();
     if let Some(current) = tasks.get_mut().iter_mut().find(|current| current.id == task.id) {
         match result {
-            Ok(()) => { current.output = 1; current.decision = CognitiveDecision::Verify; current.phase = CognitivePhase::Verify; current.state = TaskState::Verifying; }
-            Err(_) => { current.output = 0; current.state = TaskState::Failed; current.phase = CognitivePhase::Idle; }
+            Ok(()) => {
+                current.output = 1;
+                current.decision = CognitiveDecision::Verify;
+                current.phase = CognitivePhase::Verify;
+                current.state = TaskState::Verifying;
+                remember(CognitiveMemoryEntry {
+                    id: 0,
+                    kind: MemoryKind::Result,
+                    task_id: current.id,
+                    event_kind: (current.input >> 48) as u16,
+                    source: current.source,
+                    value: current.input,
+                    outcome: 1,
+                });
+            }
+            Err(_) => {
+                current.output = 0;
+                current.state = TaskState::Failed;
+                current.phase = CognitivePhase::Idle;
+                remember(CognitiveMemoryEntry {
+                    id: 0,
+                    kind: MemoryKind::Result,
+                    task_id: current.id,
+                    event_kind: (current.input >> 48) as u16,
+                    source: current.source,
+                    value: current.input,
+                    outcome: 0,
+                });
+            }
         }
     }
 }
