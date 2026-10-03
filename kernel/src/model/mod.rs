@@ -1,7 +1,10 @@
+pub mod intelligence;
 pub mod capability;
 pub mod cell;
 pub mod event;
 pub mod surface;
+pub mod window;
+pub mod compositor;
 pub mod graph;
 pub mod object;
 pub mod sync;
@@ -32,6 +35,7 @@ pub use event_port::{EventFilter,EventPort};
 pub use object::{ObjectId,ObjectKind,ResourceObject};
 pub use graph::{Relation,RelationKind};
 pub use surface::Surface;
+pub use window::{Window,WindowId};
 pub use address_space::{AddressSpace,AddressSpaceId,Mapping,MappingKind};
 pub use storage::{BlockDevice,BlockGeometry,BlockKind,BlockOp,BlockRequest};
 pub use usb::{HostControllerKind,TransferKind,UsbAddress,UsbDeviceDescriptor,UsbDeviceState,UsbEndpoint,UsbConfiguration,UsbDevice,UsbInterface,UsbEndpointDescriptor,UsbDeviceTopology,UsbMassStorageBotCbw,UsbMassStorageBotCsw,ScsiCommand,UsbMassStorageTransport,UsbMassStorageStage};

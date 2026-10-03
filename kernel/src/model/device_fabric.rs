@@ -132,7 +132,7 @@ impl DeviceFabric {
   }
   Err("USB device object not found")
  }
- fn submit_bot_cbw(&mut self,device:ObjectId,token:u64,owner_cell:u64,command:super::ScsiCommand,user_buffer:u64,user_length:u64)->Result<(),&'static str> {
+ fn submit_bot_cbw(&mut self,device:ObjectId,token:u64,owner_cell:u64,command:super::ScsiCommand,user_buffer:u64,_user_length:u64)->Result<(),&'static str> {
   let mut target=None;
   for i in 0..MAX_DEVICES { if self.usb_devices[i].object==device { target=Some(i); break; } }
   let i=target.ok_or("USB mass-storage device not found")?;
@@ -480,7 +480,7 @@ impl DeviceFabric {
       }
 
       if t.operation==11 {
-       let mut csw_ok=false;
+       let csw_ok;
        unsafe {
         let pbytes=t.dma_buffer as *const u8;
         let bytes=[

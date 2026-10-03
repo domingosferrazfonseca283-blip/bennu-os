@@ -37,12 +37,13 @@ pub enum BlockOp { Read=1, Write=2, Flush=3 }
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct BlockRequest {
+    pub owner_cell:u64,
     pub operation:BlockOp, pub device:ObjectId, pub lba:u64, pub blocks:u32,
     pub buffer:u64, pub token:u64,
 }
 impl BlockRequest {
     pub const EMPTY: Self = Self {
-        operation:BlockOp::Read, device:ObjectId::NULL, lba:0, blocks:0, buffer:0, token:0, owner_cell:0,
+        owner_cell:0, operation:BlockOp::Read, device:ObjectId::NULL, lba:0, blocks:0, buffer:0, token:0,
     };
     pub const fn is_valid(&self) -> bool {
         !self.device.is_null() && self.blocks != 0 && self.token != 0
