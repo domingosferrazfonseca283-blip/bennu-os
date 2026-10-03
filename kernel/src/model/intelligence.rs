@@ -2,6 +2,21 @@ use super::sync::SpinLock;
 
 pub const MAX_COGNITIVE_TASKS: usize = 16;
 
+pub const CAPABILITY_OBSERVE: u32 = 1 << 0;
+pub const CAPABILITY_RESEARCH: u32 = 1 << 1;
+pub const CAPABILITY_EXECUTE: u32 = 1 << 2;
+pub const CAPABILITY_COMMUNICATE: u32 = 1 << 3;
+pub const CAPABILITY_STORAGE: u32 = 1 << 4;
+pub const CAPABILITY_NETWORK: u32 = 1 << 5;
+pub const CAPABILITY_PROCESS: u32 = 1 << 6;
+pub const CAPABILITY_ALL: u32 = CAPABILITY_OBSERVE
+    | CAPABILITY_RESEARCH
+    | CAPABILITY_EXECUTE
+    | CAPABILITY_COMMUNICATE
+    | CAPABILITY_STORAGE
+    | CAPABILITY_NETWORK
+    | CAPABILITY_PROCESS;
+
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TaskKind {
@@ -17,10 +32,11 @@ pub enum TaskState {
     Empty = 0,
     Queued = 1,
     Planning = 2,
-    Running = 3,
-    Verifying = 4,
-    Completed = 5,
-    Failed = 6,
+    AwaitingAuthorization = 3,
+    Running = 4,
+    Verifying = 5,
+    Completed = 6,
+    Failed = 7,
 }
 
 #[repr(u8)]
@@ -69,6 +85,7 @@ pub struct CognitiveRuntime {
     pub cycles: u64,
     pub completed: u64,
     pub failed: u64,
+    pub authorized_mask: u32,
 }
 
 impl CognitiveRuntime {
@@ -79,6 +96,7 @@ impl CognitiveRuntime {
         cycles: 0,
         completed: 0,
         failed: 0,
+        authorized_mask: 0,
     };
 }
 
@@ -91,12 +109,44 @@ pub fn init() {
     *RUNTIME.lock() = CognitiveRuntime::EMPTY;
 }
 
+pub fn authorize(capability_mask: u32) {
+    let mut runtime = RUNTIME.lock();
+    runtime.authorized_mask |= capability_mask & CAPABILITY_ALL;
+}
+
+pub fn revoke(capability_mask: u32) {
+    let mut runtime = RUNTIME.lock();
+    runtime.authorized_mask &= !(capability_mask & CAPABILITY_ALL);
+}
+
+pub fn revoke_all() {
+    RUNTIME.lock().authorized_mask = 0;
+}
+
+pub fn authorization_mask() -> u32 {
+    RUNTIME.lock().authorized_mask
+}
+
+fn kind_capability(kind: TaskKind) -> u32 {
+    match kind {
+        TaskKind::Observe => CAPABILITY_OBSERVE,
+        TaskKind::Research => CAPABILITY_RESEARCH,
+        TaskKind::Execute => CAPABILITY_EXECUTE,
+        TaskKind::Communicate => CAPABILITY_COMMUNICATE,
+    }
+}
+
 pub fn submit(
     kind: TaskKind,
     priority: u8,
     capability_mask: u32,
     input: u64,
 ) -> Result<u64, &'static str> {
+    let requested = capability_mask | kind_capability(kind);
+    if requested & !CAPABILITY_ALL != 0 {
+        return Err("unknown cognitive capability");
+    }
+
     let mut runtime = RUNTIME.lock();
     let id = runtime.next_id;
     runtime.next_id = runtime.next_id.wrapping_add(1).max(1);
@@ -114,7 +164,7 @@ pub fn submit(
                 state: TaskState::Queued,
                 phase: CognitivePhase::Idle,
                 priority,
-                capability_mask,
+                capability_mask: requested,
                 input,
                 output: 0,
             };
@@ -166,22 +216,26 @@ pub fn tick() {
             runtime.phase = CognitivePhase::Plan;
         }
         CognitivePhase::Plan => {
-            task.phase = CognitivePhase::Execute;
-            task.state = TaskState::Running;
-            runtime.phase = CognitivePhase::Execute;
+            if task.capability_mask & !runtime.authorized_mask != 0 {
+                task.state = TaskState::AwaitingAuthorization;
+                runtime.phase = CognitivePhase::Plan;
+            } else {
+                task.phase = CognitivePhase::Execute;
+                task.state = TaskState::Running;
+                runtime.phase = CognitivePhase::Execute;
+            }
         }
         CognitivePhase::Execute => {
-            // Execution is deliberately capability-gated. A future network,
-            // speech, storage or model backend plugs into this phase instead
-            // of bypassing the OS capability fabric.
-            if task.capability_mask == 0 {
-                task.output = task.input;
+            if task.capability_mask & !runtime.authorized_mask != 0 {
+                task.state = TaskState::AwaitingAuthorization;
+                runtime.phase = CognitivePhase::Plan;
+                task.phase = CognitivePhase::Plan;
             } else {
                 task.output = task.input;
+                task.phase = CognitivePhase::Verify;
+                task.state = TaskState::Verifying;
+                runtime.phase = CognitivePhase::Verify;
             }
-            task.phase = CognitivePhase::Verify;
-            task.state = TaskState::Verifying;
-            runtime.phase = CognitivePhase::Verify;
         }
         CognitivePhase::Verify => {
             task.phase = CognitivePhase::Communicate;
