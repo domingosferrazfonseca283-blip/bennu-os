@@ -105,26 +105,26 @@ static TASKS: SpinLock<[CognitiveTask; MAX_COGNITIVE_TASKS]> =
 static RUNTIME: SpinLock<CognitiveRuntime> = SpinLock::new(CognitiveRuntime::EMPTY);
 
 pub fn init() {
-    *TASKS.lock() = [CognitiveTask::EMPTY; MAX_COGNITIVE_TASKS];
-    *RUNTIME.lock() = CognitiveRuntime::EMPTY;
+    *RUNTIME.lock().get_mut() = CognitiveRuntime::EMPTY;
+    *TASKS.lock().get_mut() = [CognitiveTask::EMPTY; MAX_COGNITIVE_TASKS];
 }
 
 pub fn authorize(capability_mask: u32) {
     let mut runtime = RUNTIME.lock();
-    runtime.authorized_mask |= capability_mask & CAPABILITY_ALL;
+    runtime.get_mut().authorized_mask |= capability_mask & CAPABILITY_ALL;
 }
 
 pub fn revoke(capability_mask: u32) {
     let mut runtime = RUNTIME.lock();
-    runtime.authorized_mask &= !(capability_mask & CAPABILITY_ALL);
+    runtime.get_mut().authorized_mask &= !(capability_mask & CAPABILITY_ALL);
 }
 
 pub fn revoke_all() {
-    RUNTIME.lock().authorized_mask = 0;
+    RUNTIME.lock().get_mut().authorized_mask = 0;
 }
 
 pub fn authorization_mask() -> u32 {
-    RUNTIME.lock().authorized_mask
+    RUNTIME.lock().get().authorized_mask
 }
 
 fn kind_capability(kind: TaskKind) -> u32 {
@@ -148,12 +148,13 @@ pub fn submit(
     }
 
     let mut runtime = RUNTIME.lock();
-    let id = runtime.next_id;
-    runtime.next_id = runtime.next_id.wrapping_add(1).max(1);
+    let runtime_state = runtime.get_mut();
+    let id = runtime_state.next_id;
+    runtime_state.next_id = runtime_state.next_id.wrapping_add(1).max(1);
     drop(runtime);
 
     let mut tasks = TASKS.lock();
-    for task in tasks.iter_mut() {
+    for task in tasks.get_mut().iter_mut() {
         if task.state == TaskState::Empty
             || task.state == TaskState::Completed
             || task.state == TaskState::Failed
@@ -194,72 +195,74 @@ fn select_task(
 
 pub fn tick() {
     let mut runtime = RUNTIME.lock();
-    runtime.cycles = runtime.cycles.wrapping_add(1);
+    let runtime_state = runtime.get_mut();
+    runtime_state.cycles = runtime_state.cycles.wrapping_add(1);
+    let authorized_mask = runtime_state.authorized_mask;
 
     let mut tasks = TASKS.lock();
-    let index = match select_task(&tasks, runtime.authorized_mask) {
+    let index = match select_task(tasks.get(), authorized_mask) {
         Some(value) => value,
         None => {
-            runtime.active = 0;
-            runtime.phase = CognitivePhase::Idle;
+            runtime_state.active = 0;
+            runtime_state.phase = CognitivePhase::Idle;
             return;
         }
     };
 
-    let task = &mut tasks[index];
-    runtime.active = task.id;
+    let task = &mut tasks.get_mut()[index];
+    runtime_state.active = task.id;
 
     match task.phase {
         CognitivePhase::Idle => {
             task.phase = CognitivePhase::Observe;
             task.state = TaskState::Planning;
-            runtime.phase = CognitivePhase::Observe;
+            runtime_state.phase = CognitivePhase::Observe;
         }
         CognitivePhase::Observe => {
             task.phase = CognitivePhase::Plan;
-            runtime.phase = CognitivePhase::Plan;
+            runtime_state.phase = CognitivePhase::Plan;
         }
         CognitivePhase::Plan => {
-            if task.capability_mask & !runtime.authorized_mask != 0 {
+            if task.capability_mask & !runtime_state.authorized_mask != 0 {
                 task.state = TaskState::AwaitingAuthorization;
-                runtime.phase = CognitivePhase::Plan;
+                runtime_state.phase = CognitivePhase::Plan;
             } else {
                 task.phase = CognitivePhase::Execute;
                 task.state = TaskState::Running;
-                runtime.phase = CognitivePhase::Execute;
+                runtime_state.phase = CognitivePhase::Execute;
             }
         }
         CognitivePhase::Execute => {
-            if task.capability_mask & !runtime.authorized_mask != 0 {
+            if task.capability_mask & !runtime_state.authorized_mask != 0 {
                 task.state = TaskState::AwaitingAuthorization;
-                runtime.phase = CognitivePhase::Plan;
+                runtime_state.phase = CognitivePhase::Plan;
                 task.phase = CognitivePhase::Plan;
             } else {
                 task.output = task.input;
                 task.phase = CognitivePhase::Verify;
                 task.state = TaskState::Verifying;
-                runtime.phase = CognitivePhase::Verify;
+                runtime_state.phase = CognitivePhase::Verify;
             }
         }
         CognitivePhase::Verify => {
             task.phase = CognitivePhase::Communicate;
-            runtime.phase = CognitivePhase::Communicate;
+            runtime_state.phase = CognitivePhase::Communicate;
         }
         CognitivePhase::Communicate => {
             task.state = TaskState::Completed;
             task.phase = CognitivePhase::Idle;
-            runtime.completed = runtime.completed.wrapping_add(1);
-            runtime.phase = CognitivePhase::Idle;
-            runtime.active = 0;
+            runtime_state.completed = runtime_state.completed.wrapping_add(1);
+            runtime_state.phase = CognitivePhase::Idle;
+            runtime_state.active = 0;
         }
     }
 }
 
 pub fn runtime() -> CognitiveRuntime {
-    *RUNTIME.lock()
+    *RUNTIME.lock().get()
 }
 
 pub fn task(id: u64) -> Option<CognitiveTask> {
     let tasks = TASKS.lock();
-    tasks.iter().find(|task| task.id == id).copied()
+    tasks.get().iter().find(|task| task.id == id).copied()
 }
