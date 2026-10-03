@@ -165,6 +165,7 @@ pub enum CognitiveDecision {
     RequestAuthorization = 2,
     Execute = 3,
     Verify = 4,
+    Remember = 5,
 }
 
 #[repr(C)]
@@ -372,6 +373,15 @@ pub fn deny_task(id: u64) -> Result<(), &'static str> {
 
     task.state = TaskState::Failed;
     task.authorized = false;
+    remember(CognitiveMemoryEntry {
+        id: 0,
+        kind: MemoryKind::Decision,
+        task_id: task.id,
+        event_kind: (task.input >> 48) as u16,
+        source: task.source,
+        value: task.input,
+        outcome: 0,
+    });
     Ok(())
 }
 
@@ -506,9 +516,13 @@ pub fn execute_authorized() {
     };
     let task = match pending { Some(value) => value, None => return };
     let result = match task.kind {
-        TaskKind::Execute if task.input >> 48 == super::EventKind::DeviceTransferCompleted as u64 =>
-            super::runtime::prepare_bennufs_mount(super::ObjectId(task.source)),
-        _ => Ok(()),
+        TaskKind::Execute
+            if task.input >> 48 == super::EventKind::DeviceTransferCompleted as u64 =>
+        {
+            super::runtime::prepare_bennufs_mount(super::ObjectId(task.source))
+        }
+        TaskKind::Observe => Ok(()),
+        _ => Err("cognitive action has no kernel executor"),
     };
     let mut tasks = TASKS.lock();
     if let Some(current) = tasks.get_mut().iter_mut().find(|current| current.id == task.id) {
