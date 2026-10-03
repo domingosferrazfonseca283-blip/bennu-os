@@ -1,4 +1,5 @@
 pub mod intelligence;
+pub mod entity;
 pub mod capability;
 pub mod cell;
 pub mod event;
