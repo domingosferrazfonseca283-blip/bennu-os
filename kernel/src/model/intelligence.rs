@@ -52,6 +52,26 @@ pub enum CognitivePhase {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct AuthorizationRequest {
+    pub id: u64,
+    pub task_id: u64,
+    pub kind: TaskKind,
+    pub capability_mask: u32,
+    pub input: u64,
+}
+
+impl AuthorizationRequest {
+    pub const EMPTY: Self = Self {
+        id: 0,
+        task_id: 0,
+        kind: TaskKind::Observe,
+        capability_mask: 0,
+        input: 0,
+    };
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct CognitiveTask {
     pub id: u64,
     pub kind: TaskKind,
@@ -158,6 +178,20 @@ pub fn submit(
     Err("cognitive task queue full")
 }
 
+pub fn authorization_request(id: u64) -> Option<AuthorizationRequest> {
+    let tasks = TASKS.lock();
+    let task = tasks.get().iter().find(|task| {
+        task.id == id && task.state == TaskState::AwaitingAuthorization
+    })?;
+    Some(AuthorizationRequest {
+        id: task.id,
+        task_id: task.id,
+        kind: task.kind,
+        capability_mask: task.capability_mask,
+        input: task.input,
+    })
+}
+
 pub fn authorize_task(id: u64) -> Result<(), &'static str> {
     let mut tasks = TASKS.lock();
     let task = tasks
@@ -166,19 +200,13 @@ pub fn authorize_task(id: u64) -> Result<(), &'static str> {
         .find(|task| task.id == id)
         .ok_or("cognitive task not found")?;
 
-    match task.state {
-        TaskState::AwaitingAuthorization | TaskState::Planning => {
-            task.authorized = true;
-            Ok(())
-        }
-        TaskState::Queued | TaskState::Running | TaskState::Verifying => {
-            Err("cognitive task is not awaiting authorization")
-        }
-        TaskState::Completed | TaskState::Failed => {
-            Err("cognitive task already finished")
-        }
-        TaskState::Empty => Err("cognitive task not found"),
+    if task.state != TaskState::AwaitingAuthorization {
+        return Err("cognitive task is not awaiting authorization");
     }
+
+    task.authorized = true;
+    task.state = TaskState::Queued;
+    Ok(())
 }
 
 pub fn deny_task(id: u64) -> Result<(), &'static str> {
