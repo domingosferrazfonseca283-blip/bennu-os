@@ -77,6 +77,7 @@ pub struct AuthorizationRequest {
     pub kind: TaskKind,
     pub capability_mask: u32,
     pub input: u64,
+    pub source: u64,
 }
 
 impl AuthorizationRequest {
@@ -86,6 +87,7 @@ impl AuthorizationRequest {
         kind: TaskKind::Observe,
         capability_mask: 0,
         input: 0,
+        source: 0,
     };
 }
 
@@ -99,8 +101,9 @@ pub struct CognitiveTask {
     pub priority: u8,
     pub capability_mask: u32,
     pub input: u64,
+    pub source: u64,
     pub output: u64,
-    pub authorized: bool,
+    pub authorized: bool;
 }
 
 impl CognitiveTask {
@@ -112,6 +115,7 @@ impl CognitiveTask {
         priority: 0,
         capability_mask: 0,
         input: 0,
+        source: 0,
         output: 0,
         authorized: false,
     };
@@ -222,6 +226,7 @@ pub fn submit(
                 priority,
                 capability_mask: requested,
                 input,
+                source: 0,
                 output: 0,
                 authorized: false,
             };
@@ -242,6 +247,7 @@ pub fn authorization_request(id: u64) -> Option<AuthorizationRequest> {
         kind: task.kind,
         capability_mask: task.capability_mask,
         input: task.input,
+        source: task.source,
     })
 }
 
@@ -309,6 +315,9 @@ pub fn tick() {
                     | (observation.value & 0x0000_ffff_ffff_ffff);
                 drop(runtime);
                 let _ = submit(kind, 0, 0, input).map(|id| {
+                    if let Some(task) = TASKS.lock().get_mut().iter_mut().find(|task| task.id == id) {
+                        task.source = observation.source;
+                    }
                     if kind == TaskKind::Observe {
                         let _ = authorize_task(id);
                     }
@@ -366,6 +375,26 @@ pub fn tick() {
             runtime_state.completed = runtime_state.completed.wrapping_add(1);
             runtime_state.phase = CognitivePhase::Idle;
             runtime_state.active = 0;
+        }
+    }
+}
+
+pub fn execute_authorized() {
+    let pending = {
+        let tasks = TASKS.lock();
+        tasks.get().iter().find(|task| task.state == TaskState::Running && task.authorized).copied()
+    };
+    let task = match pending { Some(value) => value, None => return };
+    let result = match task.kind {
+        TaskKind::Execute if task.input >> 48 == super::EventKind::DeviceCommandCompleted as u64 =>
+            super::runtime::prepare_bennufs_mount(super::ObjectId(task.source)),
+        _ => Ok(()),
+    };
+    let mut tasks = TASKS.lock();
+    if let Some(current) = tasks.get_mut().iter_mut().find(|current| current.id == task.id) {
+        match result {
+            Ok(()) => { current.output = 1; current.phase = CognitivePhase::Verify; current.state = TaskState::Verifying; }
+            Err(_) => { current.output = 0; current.state = TaskState::Failed; current.phase = CognitivePhase::Idle; }
         }
     }
 }
