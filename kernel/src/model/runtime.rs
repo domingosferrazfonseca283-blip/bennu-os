@@ -718,6 +718,42 @@ pub fn validate_graphics_buffer_mapping(
     cell: CellId,
     buffer: ObjectId,
 ) -> bool {
+    let graphics = match super::graphics::get_for_owner(buffer, cell) {
+        Some(value) => value,
+        None => return false,
+    };
+    if graphics.address & (crate::memory::PAGE_SIZE - 1) != 0 {
+        return false;
+    }
+    let required = match graphics.required_bytes() {
+        Some(value) => value,
+        None => return false,
+    };
+    if required > graphics.size { return false; }
+    let required_pages = match required.checked_add(crate::memory::PAGE_SIZE - 1) {
+        Some(value) => (value / crate::memory::PAGE_SIZE) as usize,
+        None => return false,
+    };
+    let (frames, pages) = match object_frames(graphics.object) {
+        Some(value) => value,
+        None => return false,
+    };
+    if required_pages == 0 || required_pages > pages { return false; }
+    let root = match cell_root_object(cell) { value if !value.is_null() => value, _ => return false };
+    let root_frame = match object_frame(root) { Some(value) => value, None => return false };
+    for page in 0..required_pages {
+        let virtual_address = match graphics.address.checked_add((page as u64) * crate::memory::PAGE_SIZE) {
+            Some(value) => value,
+            None => return false,
+        };
+        let physical = match crate::memory::paging::translate_user_address(root_frame, virtual_address, false) {
+            Some(value) => value,
+            None => return false,
+        };
+        if physical & !(crate::memory::PAGE_SIZE - 1) != frames[page] { return false; }
+    }
+    true
+}
 
 pub fn resource_counts() -> (u32, u32, u32, u32) {
     let guard = RUNTIME.lock();
@@ -726,17 +762,9 @@ pub fn resource_counts() -> (u32, u32, u32, u32) {
     let mut cells = 0u32;
     let mut block_devices = 0u32;
     let mut mounts = 0u32;
-    for object in state.objects.iter() {
-        if object.kind != ObjectKind::Empty { objects = objects.saturating_add(1); }
-    }
-    for cell in state.cells.iter() {
-        if cell.state != CellState::Empty { cells = cells.saturating_add(1); }
-    }
-    for device in state.block_devices.iter() {
-        if !device.object.is_null() { block_devices = block_devices.saturating_add(1); }
-    }
-    for mount in state.bennufs_mounts.iter() {
-        if mount.mounted { mounts = mounts.saturating_add(1); }
-    }
+    for object in state.objects.iter() { if object.kind != ObjectKind::Empty { objects = objects.saturating_add(1); } }
+    for cell in state.cells.iter() { if cell.state != CellState::Empty { cells = cells.saturating_add(1); } }
+    for device in state.block_devices.iter() { if !device.object.is_null() { block_devices = block_devices.saturating_add(1); } }
+    for mount in state.bennufs_mounts.iter() { if mount.mounted { mounts = mounts.saturating_add(1); } }
     (objects, cells, block_devices, mounts)
 }
