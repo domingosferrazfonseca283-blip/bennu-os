@@ -158,6 +158,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     drivers::keyboard::init();
     drivers::console::init();
     model::runtime::init();
+    model::entity::init();
     model::intelligence::init();
     model::graphics::init();
     model::surface::init();
@@ -178,6 +179,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
     }
 
     arch::diagnostics::write_line(1, b"BENNU MODEL: OBJECT + CELL FABRIC ONLINE");
+    arch::diagnostics::write_line(6, b"BENNU ENTITY: IDENTITY + LIFECYCLE ONLINE");
 
     if let Ok(device) = model::runtime::create_object(model::ObjectKind::Device, 0) {
         let _ = model::graph::link(root, device, model::RelationKind::Contains);
@@ -301,9 +303,7 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
                                 Err("reset failed")
                             };
                             let start = if dma.is_ok() {
-                                unsafe {
-                                    model::xhci::start_controller(&mut controller, cap)
-                                }
+                                unsafe { model::xhci::start_controller(&mut controller, cap) }
                             } else {
                                 Err("DMA setup failed")
                             };
@@ -361,6 +361,8 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         model::runtime::service_device_io();
         model::runtime::service_device_events();
         model::intelligence::tick();
+        let cognitive = model::intelligence::runtime();
+        model::entity::heartbeat(cognitive.phase);
         model::intelligence::execute_authorized();
         render_compositor(boot_info);
         if scheduler.step().is_none() {
