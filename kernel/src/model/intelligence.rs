@@ -91,6 +91,16 @@ impl AuthorizationRequest {
     };
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CognitiveDecision {
+    None = 0,
+    Observe = 1,
+    RequestAuthorization = 2,
+    Execute = 3,
+    Verify = 4,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct CognitiveTask {
@@ -103,7 +113,8 @@ pub struct CognitiveTask {
     pub input: u64,
     pub source: u64,
     pub output: u64,
-    pub authorized: bool;
+    pub decision: CognitiveDecision,
+    pub authorized: bool,
 }
 
 impl CognitiveTask {
@@ -117,6 +128,7 @@ impl CognitiveTask {
         input: 0,
         source: 0,
         output: 0,
+        decision: CognitiveDecision::None,
         authorized: false,
     };
 }
@@ -228,6 +240,7 @@ pub fn submit(
                 input,
                 source: 0,
                 output: 0,
+                decision: CognitiveDecision::None,
                 authorized: false,
             };
             return Ok(id);
@@ -345,9 +358,11 @@ pub fn tick() {
         }
         CognitivePhase::Plan => {
             if !task.authorized {
+                task.decision = CognitiveDecision::RequestAuthorization;
                 task.state = TaskState::AwaitingAuthorization;
                 runtime_state.phase = CognitivePhase::Plan;
             } else {
+                task.decision = CognitiveDecision::Execute;
                 task.phase = CognitivePhase::Execute;
                 task.state = TaskState::Running;
                 runtime_state.phase = CognitivePhase::Execute;
@@ -355,11 +370,12 @@ pub fn tick() {
         }
         CognitivePhase::Execute => {
             if !task.authorized {
+                task.decision = CognitiveDecision::RequestAuthorization;
                 task.state = TaskState::AwaitingAuthorization;
                 runtime_state.phase = CognitivePhase::Plan;
                 task.phase = CognitivePhase::Plan;
             } else {
-                task.output = ((task.capability_mask as u64) << 32) | (task.input & 0xffff_ffff);
+                task.decision = CognitiveDecision::Verify;
                 task.phase = CognitivePhase::Verify;
                 task.state = TaskState::Verifying;
                 runtime_state.phase = CognitivePhase::Verify;
@@ -386,14 +402,14 @@ pub fn execute_authorized() {
     };
     let task = match pending { Some(value) => value, None => return };
     let result = match task.kind {
-        TaskKind::Execute if task.input >> 48 == super::EventKind::DeviceCommandCompleted as u64 =>
+        TaskKind::Execute if task.input >> 48 == super::EventKind::DeviceTransferCompleted as u64 =>
             super::runtime::prepare_bennufs_mount(super::ObjectId(task.source)),
         _ => Ok(()),
     };
     let mut tasks = TASKS.lock();
     if let Some(current) = tasks.get_mut().iter_mut().find(|current| current.id == task.id) {
         match result {
-            Ok(()) => { current.output = 1; current.phase = CognitivePhase::Verify; current.state = TaskState::Verifying; }
+            Ok(()) => { current.output = 1; current.decision = CognitiveDecision::Verify; current.phase = CognitivePhase::Verify; current.state = TaskState::Verifying; }
             Err(_) => { current.output = 0; current.state = TaskState::Failed; current.phase = CognitivePhase::Idle; }
         }
     }
