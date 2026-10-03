@@ -3,6 +3,7 @@ use super::sync::SpinLock;
 pub const MAX_COGNITIVE_TASKS: usize = 16;
 pub const MAX_COGNITIVE_OBSERVATIONS: usize = 32;
 pub const MAX_COGNITIVE_MEMORY: usize = 64;
+pub const MAX_COGNITIVE_PLAN_STEPS: usize = 8;
 
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,6 +68,80 @@ pub fn recall(id: u64) -> Option<CognitiveMemoryEntry> {
 
 pub fn memory() -> [CognitiveMemoryEntry; MAX_COGNITIVE_MEMORY] {
     *MEMORY.lock().get()
+}
+
+
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PlanStepState {
+    Empty = 0,
+    Pending = 1,
+    Running = 2,
+    Completed = 3,
+    Failed = 4,
+    AwaitingAuthorization = 5,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CognitivePlanStep {
+    pub id: u64,
+    pub task_id: u64,
+    pub action: CognitiveDecision,
+    pub capability_mask: u32,
+    pub input: u64,
+    pub output: u64,
+    pub state: PlanStepState,
+}
+
+impl CognitivePlanStep {
+    pub const EMPTY: Self = Self {
+        id: 0,
+        task_id: 0,
+        action: CognitiveDecision::None,
+        capability_mask: 0,
+        input: 0,
+        output: 0,
+        state: PlanStepState::Empty,
+    };
+}
+
+static PLAN: SpinLock<[CognitivePlanStep; MAX_COGNITIVE_PLAN_STEPS]> =
+    SpinLock::new([CognitivePlanStep::EMPTY; MAX_COGNITIVE_PLAN_STEPS]);
+static PLAN_NEXT_ID: SpinLock<u64> = SpinLock::new(1);
+
+pub fn plan_for_task(task_id: u64, kind: TaskKind, input: u64, capability_mask: u32) -> Result<u64, &'static str> {
+    let action = match kind {
+        TaskKind::Observe => CognitiveDecision::Observe,
+        TaskKind::Execute => CognitiveDecision::Execute,
+        TaskKind::Research => CognitiveDecision::RequestAuthorization,
+        TaskKind::Communicate => CognitiveDecision::RequestAuthorization,
+    };
+    let mut next = PLAN_NEXT_ID.lock();
+    let id = *next.get();
+    *next.get_mut() = id.wrapping_add(1).max(1);
+    drop(next);
+    let mut plan = PLAN.lock();
+    for step in plan.get_mut().iter_mut() {
+        if step.state == PlanStepState::Empty || step.state == PlanStepState::Completed || step.state == PlanStepState::Failed {
+            *step = CognitivePlanStep {
+                id,
+                task_id,
+                action,
+                capability_mask,
+                input,
+                output: 0,
+                state: if action == CognitiveDecision::RequestAuthorization { PlanStepState::AwaitingAuthorization } else { PlanStepState::Pending },
+            };
+            return Ok(id);
+        }
+    }
+    Err("cognitive plan full")
+}
+
+pub fn plan_step(id: u64) -> Option<CognitivePlanStep> {
+    let plan = PLAN.lock();
+    plan.get().iter().find(|step| step.id == id).copied()
 }
 
 pub const CAPABILITY_OBSERVE: u32 = 1 << 0;
@@ -234,6 +309,8 @@ pub fn init() {
     *OBSERVATIONS.lock().get_mut() = [CognitiveObservation::EMPTY; MAX_COGNITIVE_OBSERVATIONS];
     *MEMORY.lock().get_mut() = [CognitiveMemoryEntry::EMPTY; MAX_COGNITIVE_MEMORY];
     *MEMORY_NEXT_ID.lock().get_mut() = 1;
+    *PLAN.lock().get_mut() = [CognitivePlanStep::EMPTY; MAX_COGNITIVE_PLAN_STEPS];
+    *PLAN_NEXT_ID.lock().get_mut() = 1;
 }
 
 pub fn observe(event: super::Event) -> Result<(), &'static str> {
@@ -356,6 +433,7 @@ pub fn authorize_task(id: u64) -> Result<(), &'static str> {
 
     task.authorized = true;
     task.state = TaskState::Queued;
+    let _ = plan_for_task(task.id, task.kind, task.input, task.capability_mask);
     Ok(())
 }
 
@@ -447,6 +525,7 @@ pub fn tick() {
             if !task.authorized {
                 task.decision = CognitiveDecision::RequestAuthorization;
                 task.state = TaskState::AwaitingAuthorization;
+                let _ = plan_for_task(task.id, task.kind, task.input, task.capability_mask);
                 remember(CognitiveMemoryEntry {
                     id: 0,
                     kind: MemoryKind::Decision,
@@ -459,6 +538,7 @@ pub fn tick() {
                 runtime_state.phase = CognitivePhase::Plan;
             } else {
                 task.decision = CognitiveDecision::Execute;
+                let _ = plan_for_task(task.id, task.kind, task.input, task.capability_mask);
                 task.phase = CognitivePhase::Execute;
                 task.state = TaskState::Running;
                 remember(CognitiveMemoryEntry {
