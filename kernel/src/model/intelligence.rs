@@ -1,6 +1,7 @@
 use super::sync::SpinLock;
 
 pub const MAX_COGNITIVE_TASKS: usize = 16;
+pub const MAX_COGNITIVE_OBSERVATIONS: usize = 32;
 
 pub const CAPABILITY_OBSERVE: u32 = 1 << 0;
 pub const CAPABILITY_RESEARCH: u32 = 1 << 1;
@@ -48,6 +49,24 @@ pub enum CognitivePhase {
     Execute = 3,
     Verify = 4,
     Communicate = 5,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CognitiveObservation {
+    pub event_kind: u16,
+    pub source: u64,
+    pub target: u64,
+    pub value: u64,
+}
+
+impl CognitiveObservation {
+    pub const EMPTY: Self = Self {
+        event_kind: 0,
+        source: 0,
+        target: 0,
+        value: 0,
+    };
 }
 
 #[repr(C)]
@@ -122,11 +141,45 @@ impl CognitiveRuntime {
 
 static TASKS: SpinLock<[CognitiveTask; MAX_COGNITIVE_TASKS]> =
     SpinLock::new([CognitiveTask::EMPTY; MAX_COGNITIVE_TASKS]);
+static OBSERVATIONS: SpinLock<[CognitiveObservation; MAX_COGNITIVE_OBSERVATIONS]> =
+    SpinLock::new([CognitiveObservation::EMPTY; MAX_COGNITIVE_OBSERVATIONS]);
 static RUNTIME: SpinLock<CognitiveRuntime> = SpinLock::new(CognitiveRuntime::EMPTY);
 
 pub fn init() {
     *RUNTIME.lock().get_mut() = CognitiveRuntime::EMPTY;
     *TASKS.lock().get_mut() = [CognitiveTask::EMPTY; MAX_COGNITIVE_TASKS];
+    *OBSERVATIONS.lock().get_mut() = [CognitiveObservation::EMPTY; MAX_COGNITIVE_OBSERVATIONS];
+}
+
+pub fn observe(event: super::Event) -> Result<(), &'static str> {
+    let mut observations = OBSERVATIONS.lock();
+    for slot in observations.get_mut().iter_mut() {
+        if slot.event_kind == 0 {
+            *slot = CognitiveObservation {
+                event_kind: event.kind as u16,
+                source: event.source.0,
+                target: event.target.0,
+                value: event.value,
+            };
+            return Ok(());
+        }
+    }
+    Err("cognitive observation queue full")
+}
+
+fn consume_observation() -> Option<CognitiveObservation> {
+    let mut observations = OBSERVATIONS.lock();
+    let slot = observations.get_mut().iter_mut().find(|slot| slot.event_kind != 0)?;
+    let value = *slot;
+    *slot = CognitiveObservation::EMPTY;
+    Some(value)
+}
+
+fn observation_task_kind(observation: CognitiveObservation) -> TaskKind {
+    match observation.event_kind {
+        5 | 6 | 8 | 9 | 10 | 11 => TaskKind::Execute,
+        _ => TaskKind::Observe,
+    }
 }
 
 fn kind_capability(kind: TaskKind) -> u32 {
@@ -249,6 +302,19 @@ pub fn tick() {
     let index = match select_task(tasks.get()) {
         Some(value) => value,
         None => {
+            drop(tasks);
+            if let Some(observation) = consume_observation() {
+                let kind = observation_task_kind(observation);
+                let input = ((observation.event_kind as u64) << 48)
+                    | (observation.value & 0x0000_ffff_ffff_ffff);
+                drop(runtime);
+                let _ = submit(kind, 0, 0, input).map(|id| {
+                    if kind == TaskKind::Observe {
+                        let _ = authorize_task(id);
+                    }
+                });
+                return;
+            }
             runtime_state.active = 0;
             runtime_state.phase = CognitivePhase::Idle;
             return;
@@ -284,7 +350,7 @@ pub fn tick() {
                 runtime_state.phase = CognitivePhase::Plan;
                 task.phase = CognitivePhase::Plan;
             } else {
-                task.output = task.input;
+                task.output = ((task.capability_mask as u64) << 32) | (task.input & 0xffff_ffff);
                 task.phase = CognitivePhase::Verify;
                 task.state = TaskState::Verifying;
                 runtime_state.phase = CognitivePhase::Verify;
