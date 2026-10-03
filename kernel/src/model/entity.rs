@@ -17,6 +17,28 @@ pub enum EntityLifeState {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct EntityResourceSnapshot {
+    pub objects: u32,
+    pub cells: u32,
+    pub block_devices: u32,
+    pub mounts: u32,
+    pub heartbeat: u64,
+    pub cognitive_cycles: u64,
+}
+
+impl EntityResourceSnapshot {
+    pub const EMPTY: Self = Self {
+        objects: 0,
+        cells: 0,
+        block_devices: 0,
+        mounts: 0,
+        heartbeat: 0,
+        cognitive_cycles: 0,
+    };
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct BennuEntity {
     pub identity: u64,
     pub generation: u64,
@@ -31,6 +53,7 @@ pub struct BennuEntity {
     pub last_event_kind: u16,
     pub last_source: u64,
     pub last_value: u64,
+    pub resources: EntityResourceSnapshot,
 }
 
 impl BennuEntity {
@@ -48,6 +71,7 @@ impl BennuEntity {
         last_event_kind: 0,
         last_source: 0,
         last_value: 0,
+        resources: EntityResourceSnapshot::EMPTY,
     };
 }
 
@@ -74,6 +98,7 @@ pub fn heartbeat(phase: CognitivePhase) {
         CognitivePhase::Verify => EntityLifeState::Verifying,
         CognitivePhase::Communicate => EntityLifeState::Communicating,
     };
+    entity.resources.heartbeat = entity.heartbeat;
 }
 
 pub fn observe(event: super::Event) {
@@ -87,24 +112,32 @@ pub fn observe(event: super::Event) {
 
 pub fn decision() {
     let mut guard = ENTITY.lock();
-    let entity = guard.get_mut();
-    entity.decisions = entity.decisions.wrapping_add(1);
+    guard.get_mut().decisions = guard.get().decisions.wrapping_add(1);
 }
 
 pub fn action() {
     let mut guard = ENTITY.lock();
-    let entity = guard.get_mut();
-    entity.actions = entity.actions.wrapping_add(1);
+    guard.get_mut().actions = guard.get().actions.wrapping_add(1);
 }
 
 pub fn verification() {
     let mut guard = ENTITY.lock();
-    let entity = guard.get_mut();
-    entity.verifications = entity.verifications.wrapping_add(1);
+    guard.get_mut().verifications = guard.get().verifications.wrapping_add(1);
 }
 
 pub fn communication() {
     let mut guard = ENTITY.lock();
+    guard.get_mut().communications = guard.get().communications.wrapping_add(1);
+}
+
+pub fn refresh_resources() {
+    let (objects, cells, block_devices, mounts) = super::runtime::resource_counts();
+    let cognitive = super::intelligence::runtime();
+    let mut guard = ENTITY.lock();
     let entity = guard.get_mut();
-    entity.communications = entity.communications.wrapping_add(1);
+    entity.resources.objects = objects;
+    entity.resources.cells = cells;
+    entity.resources.block_devices = block_devices;
+    entity.resources.mounts = mounts;
+    entity.resources.cognitive_cycles = cognitive.cycles;
 }
