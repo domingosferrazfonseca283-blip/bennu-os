@@ -40,7 +40,7 @@ impl CognitiveModel{pub const EMPTY:Self=Self{id:0,kind:ModelKind::RuleBased,ver
 static MODELS:SpinLock<[CognitiveModel;MAX_COGNITIVE_MODELS]>=SpinLock::new([CognitiveModel::EMPTY;MAX_COGNITIVE_MODELS]);
 static MODEL_NEXT_ID:SpinLock<u64>=SpinLock::new(1);
 pub fn register_model(kind:ModelKind,version:u32,memory_object:u64,bytes:u64)->Result<u64,&'static str>{if version==0||memory_object==0||bytes==0{return Err("invalid cognitive model")}let(_,pages)=super::runtime::object_frames(super::ObjectId(memory_object)).ok_or("cognitive model memory is not valid")?;if bytes>(pages as u64).checked_mul(crate::memory::PAGE_SIZE).ok_or("cognitive model backing size overflow")?{return Err("cognitive model exceeds backing memory")}let mut n=MODEL_NEXT_ID.lock();let id=*n.get();*n.get_mut()=id.wrapping_add(1).max(1);drop(n);let mut models=MODELS.lock();let has_active=models.get().iter().any(|m|m.active);for m in models.get_mut().iter_mut(){if !m.active{*m=CognitiveModel{id,kind,version,memory_object,bytes,active:!has_active};return Ok(id)}}Err("cognitive model registry full")}
-pub fn activate_model(id:u64)->Result<(),&'static str>{let mut m=MODELS.lock();if !m.get().iter().any(|x|x.id==id&&!x.id.eq(&0)){return Err("cognitive model not found")}for x in m.get_mut().iter_mut(){x.active=x.id==id}Ok(())}
+pub fn activate_model(id:u64)->Result<(),&'static str>{let mut m=MODELS.lock();if !m.get().iter().any(|x|x.id==id&&x.id!=0){return Err("cognitive model not found")}for x in m.get_mut().iter_mut(){x.active=x.id==id}Ok(())}
 pub fn active_model()->Option<CognitiveModel>{MODELS.lock().get().iter().find(|m|m.active).copied()}
 
 #[repr(C)]
