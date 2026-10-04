@@ -72,10 +72,20 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
         Operation::Yield => ResultCode::error(ABI_STATUS_YIELD),
         Operation::Present => ResultCode::error(ABI_STATUS_INVALID),
         Operation::AuthorizationQuery => {
-            match super::intelligence::authorization_request(call.argument) {
-                Some(request) => ResultCode { status: ABI_STATUS_OK, value: request.task_id },
-                None => ResultCode::error(ABI_STATUS_NOT_FOUND),
-            }
+            if cell.0 != 1 { return ResultCode::error(ABI_STATUS_DENIED); }
+            let request = match super::intelligence::authorization_request(call.argument) {
+                Some(request) => request,
+                None => return ResultCode::error(ABI_STATUS_NOT_FOUND),
+            };
+            let value = match call.value {
+                0 => request.task_id,
+                1 => request.kind as u64,
+                2 => request.capability_mask as u64,
+                3 => request.input,
+                4 => request.source,
+                _ => return ResultCode::error(ABI_STATUS_INVALID),
+            };
+            ResultCode { status: ABI_STATUS_OK, value }
         }
         Operation::AuthorizationResolve => {
             if cell.0 != 1 { return ResultCode::error(ABI_STATUS_DENIED); }
