@@ -714,7 +714,25 @@ pub fn object_frame(id: ObjectId) -> Option<u64> {
     if frame == 0 { None } else { Some(frame) }
 }
 
-pub fn validate_graphics_buffer_mapping(\n    cell: CellId,\n    buffer: ObjectId,\n) -> bool {\n    let graphics = match super::graphics::get_for_owner(buffer, cell) { Some(value) => value, None => return false };\n    let (frames, pages) = match object_frames(graphics.object) { Some(value) => value, None => return false };\n    if graphics.address & (crate::memory::PAGE_SIZE - 1) != 0 { return false; }\n    let required = match graphics.required_bytes() { Some(value) => value, None => return false };\n    if required > graphics.size { return false; }\n    let needed_pages = match required.checked_add(crate::memory::PAGE_SIZE - 1) { Some(value) => (value / crate::memory::PAGE_SIZE) as usize, None => return false };\n    if needed_pages == 0 || needed_pages > pages || needed_pages > MAX_MEMORY_PAGES { return false; }\n    let root = match cell_address_space_root(cell) { Some(value) if value != 0 => value, _ => return false };\n    for page in 0..needed_pages {\n        let offset = match (page as u64).checked_mul(crate::memory::PAGE_SIZE) { Some(value) => value, None => return false };\n        let virtual_address = match graphics.address.checked_add(offset) { Some(value) => value, None => return false };\n        let physical = match crate::memory::paging::translate_user_address(root, virtual_address, false) { Some(value) => value, None => return false };\n        if physical != frames[page] { return false; }\n    }\n    true\n}\n\npub fn resource_counts() -> (u32, u32, u32, u32) {
+pub fn validate_graphics_buffer_mapping(cell: CellId, buffer: ObjectId) -> bool {
+    let graphics = match super::graphics::get_for_owner(buffer, cell) { Some(value) => value, None => return false };
+    let (frames, pages) = match object_frames(graphics.object) { Some(value) => value, None => return false };
+    if graphics.address & (crate::memory::PAGE_SIZE - 1) != 0 { return false; }
+    let required = match graphics.required_bytes() { Some(value) => value, None => return false };
+    if required > graphics.size { return false; }
+    let needed_pages = match required.checked_add(crate::memory::PAGE_SIZE - 1) { Some(value) => (value / crate::memory::PAGE_SIZE) as usize, None => return false };
+    if needed_pages == 0 || needed_pages > pages || needed_pages > MAX_MEMORY_PAGES { return false; }
+    let root = match cell_address_space_root(cell) { Some(value) if value != 0 => value, _ => return false };
+    for page in 0..needed_pages {
+        let offset = match (page as u64).checked_mul(crate::memory::PAGE_SIZE) { Some(value) => value, None => return false };
+        let virtual_address = match graphics.address.checked_add(offset) { Some(value) => value, None => return false };
+        let physical = match crate::memory::paging::translate_user_address(root, virtual_address, false) { Some(value) => value, None => return false };
+        if physical != frames[page] { return false; }
+    }
+    true
+}
+
+pub fn resource_counts() -> (u32, u32, u32, u32) {
     let guard = RUNTIME.lock();
     let state = guard.get();
     let mut objects = 0u32;
