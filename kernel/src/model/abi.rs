@@ -17,6 +17,8 @@ pub enum Operation {
     DeviceSubmit = 8,
     Yield = 9,
     Present = 10,
+    AuthorizationQuery = 11,
+    AuthorizationResolve = 12,
 }
 
 #[repr(C)]
@@ -69,6 +71,22 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
     match call.operation {
         Operation::Yield => ResultCode::error(ABI_STATUS_YIELD),
         Operation::Present => ResultCode::error(ABI_STATUS_INVALID),
+        Operation::AuthorizationQuery => {
+            match super::intelligence::authorization_request(call.argument) {
+                Some(request) => ResultCode { status: ABI_STATUS_OK, value: request.task_id },
+                None => ResultCode::error(ABI_STATUS_NOT_FOUND),
+            }
+        }
+        Operation::AuthorizationResolve => {
+            if cell.0 != 1 { return ResultCode::error(ABI_STATUS_DENIED); }
+            let granted = (call.value & 1) != 0;
+            let result = if granted {
+                super::intelligence::authorize_task(call.argument)
+            } else {
+                super::intelligence::deny_task(call.argument)
+            };
+            match result { Ok(()) => ResultCode::OK, Err(_) => ResultCode::error(ABI_STATUS_DENIED) }
+        }
         Operation::None => ResultCode::error(ABI_STATUS_INVALID),
 
         Operation::ObjectQuery => {
