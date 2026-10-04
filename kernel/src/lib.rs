@@ -128,6 +128,15 @@ pub fn init(boot_info: *const boot_info::BootInfo) {
         model::runtime::service_device_io();
         model::runtime::service_device_events();
         model::intelligence::tick();
+        if let Some(task_id) = model::intelligence::take_authorization_request() {
+            let target = model::runtime::cell_root_object(model::CellId(2)).unwrap_or(model::ObjectId::NULL);
+            let _ = model::runtime::emit(model::Event::new(
+                model::EventKind::AuthorizationRequested,
+                model::ObjectId::NULL,
+                target,
+                task_id,
+            ));
+        }
         let cognitive = model::intelligence::runtime();
         model::entity::heartbeat(cognitive.phase);
         model::entity::refresh_resources();
