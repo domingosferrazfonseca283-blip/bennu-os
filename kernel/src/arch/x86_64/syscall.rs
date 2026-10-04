@@ -125,6 +125,8 @@ extern "C" fn bennu_syscall_dispatch(frame: *mut RegisterFrame) -> u64 {
         8 => Operation::DeviceSubmit,
         9 => Operation::Yield,
         10 => Operation::Present,
+        11 => Operation::AuthorizationQuery,
+        12 => Operation::AuthorizationResolve,
         _ => return abi::ABI_STATUS_UNSUPPORTED,
     };
 
