@@ -15,6 +15,8 @@ pub enum EventKind {
     DeviceCompleted = 9,
     DeviceCommandCompleted = 10,
     DeviceTransferCompleted = 11,
+    AuthorizationRequested = 12,
+    AuthorizationResolved = 13,
 }
 
 #[repr(C)]

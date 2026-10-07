@@ -4,10 +4,19 @@ use crate::arch::x86_64::pit;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 static CURRENT_CELL: AtomicU32 = AtomicU32::new(u32::MAX);
+static SCHEDULER_EPOCH: AtomicU32 = AtomicU32::new(0);
 
 pub fn current_cell() -> Option<CellId> {
     let id = CURRENT_CELL.load(Ordering::Acquire);
     if id == u32::MAX { None } else { Some(CellId(id)) }
+}
+
+pub fn scheduler_epoch() -> u32 {
+    SCHEDULER_EPOCH.load(Ordering::Acquire)
+}
+
+pub fn clear_current_cell() {
+    CURRENT_CELL.store(u32::MAX, Ordering::Release);
 }
 
 /// Entry trampoline for native Bennu Cell execution.
@@ -59,6 +68,8 @@ impl Scheduler {
             return None;
         }
 
+        SCHEDULER_EPOCH.fetch_add(1, Ordering::AcqRel);
+
         for offset in 0..MAX_CELLS {
             let index = (self.cursor + offset) % MAX_CELLS;
             let id = CellId(index as u32);
@@ -75,11 +86,24 @@ impl Scheduler {
             self.cursor = (index + 1) % MAX_CELLS;
             CURRENT_CELL.store(id.0, Ordering::Release);
 
+            if super::runtime::start_cell(id).is_err() {
+                // The identity is only valid while this Cell is actually
+                // executing. Never leave a failed dispatch as current.
+                clear_current_cell();
+                continue;
+            }
+
             unsafe {
                 if execution::switch_to_cell(context, address_space_root).is_ok() {
+                    // Returning here means the Cell yielded/stopped and the
+                    // scheduler stack is active again.
+                    clear_current_cell();
                     return Some(id);
                 }
             }
+
+            let _ = super::runtime::finish_cell(id, CellAction::Yield);
+            clear_current_cell();
         }
 
         None

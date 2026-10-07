@@ -7,6 +7,7 @@ use super::allocate_frame_below;
 pub const PAGE_SIZE: u64 = 4096;
 pub const HEAP_BASE: u64 = 64 * 1024 * 1024;
 pub const HEAP_SIZE: u64 = 8 * 1024 * 1024;
+const USER_ADDRESS_LIMIT: u64 = 0x0000_8000_0000_0000;
 
 const PAGE_TABLE_ENTRIES: usize = 512;
 const PRESENT: u64 = 1 << 0;
@@ -140,6 +141,12 @@ fn map_page_in_root_with_flags(
     if virtual_address & (PAGE_SIZE - 1) != 0 || physical_frame & (PAGE_SIZE - 1) != 0 {
         return Err("unaligned page mapping");
     }
+    if user && virtual_address >= USER_ADDRESS_LIMIT {
+        return Err("user mapping outside canonical user range");
+    }
+    if user && virtual_address.checked_add(PAGE_SIZE).is_none_or(|end| end > USER_ADDRESS_LIMIT) {
+        return Err("user mapping crosses user address limit");
+    }
 
     let pml4_index = ((virtual_address >> 39) & 0x1ff) as usize;
     let pdpt_index = ((virtual_address >> 30) & 0x1ff) as usize;
@@ -246,6 +253,42 @@ pub fn translate_user_address(root: u64, virtual_address: u64, write: bool) -> O
     }
 }
 
+
+/// Validate that a user buffer is fully mapped in a Cell address space.
+///
+/// This is used at privileged boundaries before the kernel or a DMA-capable
+/// device is allowed to consume a user-provided buffer.
+pub fn validate_user_buffer(
+    root: u64,
+    base: u64,
+    length: u64,
+    write: bool,
+) -> bool {
+    if length == 0 || base >= USER_ADDRESS_LIMIT {
+        return false;
+    }
+    let end = match base.checked_add(length - 1) {
+        Some(end) if end < USER_ADDRESS_LIMIT => end,
+        _ => return false,
+    };
+
+    let first_page = base & !(PAGE_SIZE - 1);
+    let last_page = end & !(PAGE_SIZE - 1);
+    let mut page = first_page;
+    loop {
+        if translate_user_address(root, page, write).is_none() {
+            return false;
+        }
+        if page == last_page {
+            return true;
+        }
+        page = match page.checked_add(PAGE_SIZE) {
+            Some(next) => next,
+            None => return false,
+        };
+    }
+}
+
 pub fn map_page(virtual_address: u64, physical_frame: u64) -> Result<(), &'static str> {
     if virtual_address & (PAGE_SIZE - 1) != 0
         || physical_frame & (PAGE_SIZE - 1) != 0
@@ -314,16 +357,23 @@ pub fn map_page(virtual_address: u64, physical_frame: u64) -> Result<(), &'stati
 
 
 pub const MMIO_BASE: u64 = 0xffff_8000_0000_0000;
+static mut MMIO_NEXT: u64 = MMIO_BASE;
 
 pub fn map_mmio(physical_base:u64, length:u64) -> Result<u64,&'static str> {
     if length == 0 { return Err("empty MMIO range"); }
     let physical = physical_base & !(PAGE_SIZE - 1);
     let end = physical_base.checked_add(length).ok_or("MMIO range overflow")?;
     let pages = (end - physical + PAGE_SIZE - 1) / PAGE_SIZE;
+    let span = pages.checked_mul(PAGE_SIZE).ok_or("MMIO virtual range overflow")?;
+    let virtual_base = unsafe {
+        let base = MMIO_NEXT;
+        MMIO_NEXT = base.checked_add(span).ok_or("MMIO virtual range overflow")?;
+        base
+    };
     for page in 0..pages {
-        let va = MMIO_BASE.checked_add(page * PAGE_SIZE).ok_or("MMIO virtual range overflow")?;
+        let va = virtual_base.checked_add(page * PAGE_SIZE).ok_or("MMIO virtual range overflow")?;
         let pa = physical.checked_add(page * PAGE_SIZE).ok_or("MMIO physical range overflow")?;
         map_page(va, pa)?;
     }
-    Ok(MMIO_BASE + (physical_base - physical))
+    Ok(virtual_base + (physical_base - physical))
 }

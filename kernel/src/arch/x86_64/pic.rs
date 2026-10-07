@@ -20,7 +20,8 @@ pub unsafe fn init() {
     outb(SLAVE_DATA, 2);
     outb(MASTER_DATA, ICW4_8086);
     outb(SLAVE_DATA, ICW4_8086);
-    outb(MASTER_DATA, master_mask | 0xFE);
+    // Keep timer (IRQ0) and keyboard (IRQ1) enabled; mask the remaining legacy IRQs.
+    outb(MASTER_DATA, master_mask & !0x03);
     outb(SLAVE_DATA, slave_mask | 0xFF);
 }
 

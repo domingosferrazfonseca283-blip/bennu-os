@@ -16,6 +16,9 @@ pub enum Operation {
     SurfaceCreate = 7,
     DeviceSubmit = 8,
     Yield = 9,
+    Present = 10,
+    AuthorizationQuery = 11,
+    AuthorizationResolve = 12,
 }
 
 #[repr(C)]
@@ -67,6 +70,33 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
 
     match call.operation {
         Operation::Yield => ResultCode::error(ABI_STATUS_YIELD),
+        Operation::Present => ResultCode::error(ABI_STATUS_INVALID),
+        Operation::AuthorizationQuery => {
+            if cell.0 != 1 { return ResultCode::error(ABI_STATUS_DENIED); }
+            let request = match super::intelligence::authorization_request(call.argument) {
+                Some(request) => request,
+                None => return ResultCode::error(ABI_STATUS_NOT_FOUND),
+            };
+            let value = match call.value {
+                0 => request.task_id,
+                1 => request.kind as u64,
+                2 => request.capability_mask as u64,
+                3 => request.input,
+                4 => request.source,
+                _ => return ResultCode::error(ABI_STATUS_INVALID),
+            };
+            ResultCode { status: ABI_STATUS_OK, value }
+        }
+        Operation::AuthorizationResolve => {
+            if cell.0 != 1 { return ResultCode::error(ABI_STATUS_DENIED); }
+            let granted = (call.value & 1) != 0;
+            let result = if granted {
+                super::intelligence::authorize_task(call.argument)
+            } else {
+                super::intelligence::deny_task(call.argument)
+            };
+            match result { Ok(()) => ResultCode::OK, Err(_) => ResultCode::error(ABI_STATUS_DENIED) }
+        }
         Operation::None => ResultCode::error(ABI_STATUS_INVALID),
 
         Operation::ObjectQuery => {
@@ -166,5 +196,17 @@ pub fn dispatch(cell: super::CellId, call: &Call) -> ResultCode {
                 Err(_) => ResultCode::error(ABI_STATUS_INVALID),
             }
         }
+    }
+}
+
+
+pub fn dispatch_present(
+    cell: super::CellId,
+    capability: CapabilityId,
+    present: &super::graphics::Present,
+) -> ResultCode {
+    match super::runtime::present_surface(cell, capability, present) {
+        Ok(()) => ResultCode::OK,
+        Err(_) => ResultCode::error(ABI_STATUS_DENIED),
     }
 }
